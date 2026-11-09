@@ -21,8 +21,8 @@ using System.Windows.Forms;
 [assembly: AssemblyCompany("Contas da Mãe")]
 [assembly: AssemblyProduct("Contas a Pagar")]
 [assembly: AssemblyCopyright("Copyright © 2026")]
-[assembly: AssemblyVersion("1.0.1.0")]
-[assembly: AssemblyFileVersion("1.0.1.0")]
+[assembly: AssemblyVersion("1.2.0.0")]
+[assembly: AssemblyFileVersion("1.2.0.0")]
 
 namespace ContasAPagar
 {
@@ -110,7 +110,7 @@ namespace ContasAPagar
     // =========================================================================
     public static class StorageService
     {
-        public static readonly string AppVersion = "1.0.1";
+        public static readonly string AppVersion = "1.2.0";
         public static readonly string GitHubRepo = "BrenoSGTO/app-contas-a-pagar-mae";
 
         public static string GetDataFolder()
@@ -210,29 +210,56 @@ namespace ContasAPagar
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
-                using (GraphicsPath path = RoundedRect(new Rectangle(2, 2, size - 4, size - 4), size / 5))
-                using (LinearGradientBrush brush = new LinearGradientBrush(
+                float s = size / 64f;
+
+                // Deep Slate rounded rect background
+                using (GraphicsPath path = RoundedRect(new Rectangle((int)(3 * s), (int)(3 * s), (int)(size - 6 * s), (int)(size - 6 * s)), Math.Max(2, (int)(8 * s))))
+                using (LinearGradientBrush bgBrush = new LinearGradientBrush(
                     new Rectangle(0, 0, size, size),
-                    Color.FromArgb(147, 51, 234),
-                    Color.FromArgb(107, 33, 168),
+                    Color.FromArgb(15, 23, 42),
+                    Color.FromArgb(30, 41, 59),
                     45f))
                 {
-                    g.FillPath(brush, path);
+                    g.FillPath(bgBrush, path);
                 }
 
-                // Draw small check/spreadsheet lines
-                using (Pen whitePen = new Pen(Color.FromArgb(230, 255, 255, 255), Math.Max(2f, size / 14f)))
+                // Emerald top bar
+                using (GraphicsPath barPath = RoundedRect(new Rectangle((int)(4 * s), (int)(4 * s), (int)(size - 8 * s), Math.Max(4, (int)(14 * s))), Math.Max(2, (int)(4 * s))))
+                using (LinearGradientBrush accentBrush = new LinearGradientBrush(
+                    new Rectangle(0, 0, size, Math.Max(4, (int)(16 * s))),
+                    Color.FromArgb(16, 185, 129),
+                    Color.FromArgb(5, 150, 105),
+                    0f))
                 {
-                    whitePen.StartCap = LineCap.Round;
-                    whitePen.EndCap = LineCap.Round;
-                    whitePen.LineJoin = LineJoin.Round;
+                    g.FillPath(accentBrush, barPath);
+                }
 
-                    // Checkmark at bottom right
-                    g.DrawLines(whitePen, new PointF[] {
-                        new PointF(size * 0.25f, size * 0.52f),
-                        new PointF(size * 0.43f, size * 0.70f),
-                        new PointF(size * 0.76f, size * 0.32f)
-                    });
+                // Grid subtle lines
+                using (SolidBrush gridBrush = new SolidBrush(Color.FromArgb(71, 85, 105)))
+                {
+                    g.FillRectangle(gridBrush, 12f * s, 26f * s, 16f * s, Math.Max(2f, 3.5f * s));
+                    g.FillRectangle(gridBrush, 12f * s, 34f * s, 13f * s, Math.Max(2f, 3.5f * s));
+                    g.FillRectangle(gridBrush, 12f * s, 42f * s, 11f * s, Math.Max(2f, 3.5f * s));
+                }
+
+                // Emerald check badge
+                using (SolidBrush badgeBrush = new SolidBrush(Color.FromArgb(16, 185, 129)))
+                {
+                    g.FillEllipse(badgeBrush, 28f * s, 26f * s, 26f * s, 26f * s);
+                }
+
+                using (Pen pen = new Pen(Color.White, Math.Max(2f, 3.8f * s)))
+                {
+                    pen.StartCap = LineCap.Round;
+                    pen.EndCap = LineCap.Round;
+                    pen.LineJoin = LineJoin.Round;
+                    PointF[] pts = new PointF[]
+                    {
+                        new PointF(34f * s, 39f * s),
+                        new PointF(39f * s, 44f * s),
+                        new PointF(48f * s, 34f * s)
+                    };
+                    g.DrawLines(pen, pts);
                 }
             }
             return bmp;
@@ -291,7 +318,22 @@ namespace ContasAPagar
             {
                 Dock = DockStyle.Top,
                 Height = 90,
-                BackColor = Color.FromArgb(126, 34, 206)
+                BackColor = Color.FromArgb(15, 23, 42)
+            };
+            header.Paint += (s, e) =>
+            {
+                using (LinearGradientBrush br = new LinearGradientBrush(
+                    header.ClientRectangle,
+                    Color.FromArgb(15, 23, 42),
+                    Color.FromArgb(30, 41, 59),
+                    0f))
+                {
+                    e.Graphics.FillRectangle(br, header.ClientRectangle);
+                }
+                using (SolidBrush lineBrush = new SolidBrush(Color.FromArgb(16, 185, 129)))
+                {
+                    e.Graphics.FillRectangle(lineBrush, 0, header.Height - 3, header.Width, 3);
+                }
             };
 
             PictureBox pic = new PictureBox
@@ -299,7 +341,8 @@ namespace ContasAPagar
                 Image = AppIconBuilder.CreateIconBitmap(56),
                 Size = new Size(56, 56),
                 Location = new Point(22, 17),
-                SizeMode = PictureBoxSizeMode.StretchImage
+                SizeMode = PictureBoxSizeMode.StretchImage,
+                BackColor = Color.Transparent
             };
             header.Controls.Add(pic);
 
@@ -309,17 +352,19 @@ namespace ContasAPagar
                 ForeColor = Color.White,
                 Font = new Font("Segoe UI Semibold", 15F, FontStyle.Bold),
                 AutoSize = true,
-                Location = new Point(92, 18)
+                Location = new Point(92, 18),
+                BackColor = Color.Transparent
             };
             header.Controls.Add(lblTitle);
 
             Label lblSub = new Label
             {
                 Text = "Instalador oficial para o computador (Versão " + StorageService.AppVersion + ")",
-                ForeColor = Color.FromArgb(233, 213, 255),
+                ForeColor = Color.FromArgb(203, 213, 225),
                 Font = new Font("Segoe UI", 9.5F),
                 AutoSize = true,
-                Location = new Point(94, 50)
+                Location = new Point(94, 50),
+                BackColor = Color.Transparent
             };
             header.Controls.Add(lblSub);
             Controls.Add(header);
@@ -388,7 +433,7 @@ namespace ContasAPagar
                 Text = "Instalar Agora",
                 Size = new Size(170, 40),
                 Location = new Point(195, 308),
-                BackColor = Color.FromArgb(22, 163, 74),
+                BackColor = Color.FromArgb(16, 185, 129),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI Semibold", 11F, FontStyle.Bold),
@@ -476,7 +521,7 @@ namespace ContasAPagar
 
                 progressBar.Value = 100;
                 lblStatus.Text = "Instalação concluída com sucesso!";
-                lblStatus.ForeColor = Color.FromArgb(22, 163, 74);
+                lblStatus.ForeColor = Color.FromArgb(16, 185, 129);
 
                 MessageBox.Show(
                     "O aplicativo 'Contas a Pagar' foi instalado com sucesso!\n\n" +
@@ -893,15 +938,31 @@ namespace ContasAPagar
             {
                 Dock = DockStyle.Top,
                 Height = 68,
-                BackColor = Color.FromArgb(126, 34, 206)
+                BackColor = Color.FromArgb(15, 23, 42)
+            };
+            header.Paint += (s, e) =>
+            {
+                using (LinearGradientBrush br = new LinearGradientBrush(
+                    header.ClientRectangle,
+                    Color.FromArgb(15, 23, 42),
+                    Color.FromArgb(30, 41, 59),
+                    0f))
+                {
+                    e.Graphics.FillRectangle(br, header.ClientRectangle);
+                }
+                using (SolidBrush lineBrush = new SolidBrush(Color.FromArgb(16, 185, 129)))
+                {
+                    e.Graphics.FillRectangle(lineBrush, 0, header.Height - 3, header.Width, 3);
+                }
             };
             Label lblHeader = new Label
             {
-                Text = isEdit ? "✏️  Editar Conta" : "➕  Cadastrar Nova Conta Recorrente",
+                Text = isEdit ? "Editar Conta" : "Cadastrar Nova Conta Recorrente",
                 ForeColor = Color.White,
                 Font = new Font("Segoe UI Semibold", 14F, FontStyle.Bold),
                 AutoSize = true,
-                Location = new Point(22, 19)
+                Location = new Point(22, 19),
+                BackColor = Color.Transparent
             };
             header.Controls.Add(lblHeader);
             Controls.Add(header);
@@ -1072,7 +1133,7 @@ namespace ContasAPagar
                 Location = new Point(16, 90),
                 Size = new Size(465, 22),
                 Font = new Font("Segoe UI", 9F, FontStyle.Italic),
-                ForeColor = Color.FromArgb(126, 34, 206)
+                ForeColor = Color.FromArgb(5, 150, 105)
             };
             grpRecurrence.Controls.Add(lblPreviewSchedule);
 
@@ -1098,7 +1159,7 @@ namespace ContasAPagar
                 Text = "✔  Salvar Conta",
                 Location = new Point(205, y),
                 Size = new Size(185, 42),
-                BackColor = Color.FromArgb(22, 163, 74),
+                BackColor = Color.FromArgb(16, 185, 129),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI Semibold", 11F, FontStyle.Bold),
@@ -1137,7 +1198,7 @@ namespace ContasAPagar
             if (rbContinuous.Checked)
             {
                 lblPreviewSchedule.Text = string.Format(
-                    "📅 1º pagamento em {0:dd/MM/yyyy} • Repetirá todo dia {1:00} de cada mês.",
+                    "• 1º pagamento em {0:dd/MM/yyyy} • Repetirá todo dia {1:00} de cada mês.",
                     firstDate, day);
             }
             else
@@ -1147,7 +1208,7 @@ namespace ContasAPagar
                 int lastMax = DateTime.DaysInMonth(lastMonth.Year, lastMonth.Month);
                 DateTime lastDate = new DateTime(lastMonth.Year, lastMonth.Month, Math.Min(day, lastMax));
                 lblPreviewSchedule.Text = string.Format(
-                    "📅 1º pagamento: {0:dd/MM/yyyy}  até  Último ({1}º): {2:dd/MM/yyyy}",
+                    "• 1º pagamento: {0:dd/MM/yyyy}  até  Último ({1}º): {2:dd/MM/yyyy}",
                     firstDate, count, lastDate);
             }
         }
@@ -1208,6 +1269,9 @@ namespace ContasAPagar
     // =========================================================================
     // MAIN SPREADSHEET FORM
     // =========================================================================
+    // =========================================================================
+    // MAIN SPREADSHEET FORM
+    // =========================================================================
     public class MainForm : Form
     {
         private AppDatabase db;
@@ -1217,13 +1281,25 @@ namespace ContasAPagar
 
         // Controls
         private Label lblCurrentMonthTitle;
+        private Label lblMonthCaption;
         private ComboBox cmbMonthSelect;
         private NumericUpDown numYearSelect;
 
+        private Panel dashboardPanel;
+        private Panel monthBox;
+        private Panel cardTotal;
+        private Panel cardPaid;
+        private Panel cardPending;
+
+        private Label lblCardTotalTitle;
         private Label lblCardTotalValue;
         private Label lblCardTotalSub;
+
+        private Label lblCardPaidTitle;
         private Label lblCardPaidValue;
         private Label lblCardPaidSub;
+
+        private Label lblCardPendingTitle;
         private Label lblCardPendingValue;
         private Label lblCardPendingSub;
 
@@ -1231,10 +1307,15 @@ namespace ContasAPagar
         private DataGridView gridMonthly;
         private DataGridView gridAnnual;
 
+        private Panel filterBar;
+        private Label lblSearchIcon;
         private TextBox txtSearch;
         private Button btnFilterAll;
         private Button btnFilterPending;
         private Button btnFilterPaid;
+        private Button btnFilterOverdue;
+        private Button btnEditSelected;
+        private Button btnDeleteSelected;
         private Label lblStatusFooter;
 
         private bool isPopulating = false;
@@ -1259,6 +1340,7 @@ namespace ContasAPagar
 
             InitializeComponent();
             EnsureSampleWelcomeIfNeeded();
+            SyncTabContext();
             RefreshAllViews();
         }
 
@@ -1269,23 +1351,38 @@ namespace ContasAPagar
 
         private void InitializeComponent()
         {
-            Text = "Contas a Pagar da Mãe - Planilha de Controle Mensal (v" + StorageService.AppVersion + ")";
-            Size = new Size(1240, 780);
+            Text = "Contas a Pagar da Mãe - Planilha Inteligente (v" + StorageService.AppVersion + ")";
+            Size = new Size(1260, 800);
             MinimumSize = new Size(1024, 640);
             StartPosition = FormStartPosition.CenterScreen;
-            BackColor = Color.FromArgb(241, 245, 249);
+            BackColor = Color.FromArgb(248, 250, 252);
             Font = new Font("Segoe UI", 10F);
             Icon = AppIconBuilder.CreateAppIcon();
 
             // -----------------------------------------------------------------
-            // 1. TOP HEADER BAR
+            // 1. TOP HEADER BAR (Deep Slate with Emerald Accent)
             // -----------------------------------------------------------------
             Panel topBar = new Panel
             {
                 Dock = DockStyle.Top,
                 Height = 72,
-                BackColor = Color.FromArgb(107, 33, 168),
+                BackColor = Color.FromArgb(15, 23, 42),
                 Padding = new Padding(18, 10, 18, 10)
+            };
+            topBar.Paint += (s, e) =>
+            {
+                using (LinearGradientBrush br = new LinearGradientBrush(
+                    topBar.ClientRectangle,
+                    Color.FromArgb(15, 23, 42),
+                    Color.FromArgb(30, 41, 59),
+                    0f))
+                {
+                    e.Graphics.FillRectangle(br, topBar.ClientRectangle);
+                }
+                using (SolidBrush lineBrush = new SolidBrush(Color.FromArgb(16, 185, 129)))
+                {
+                    e.Graphics.FillRectangle(lineBrush, 0, topBar.Height - 3, topBar.Width, 3);
+                }
             };
 
             PictureBox logoBox = new PictureBox
@@ -1293,7 +1390,8 @@ namespace ContasAPagar
                 Image = AppIconBuilder.CreateIconBitmap(46),
                 Size = new Size(46, 46),
                 Location = new Point(18, 13),
-                SizeMode = PictureBoxSizeMode.StretchImage
+                SizeMode = PictureBoxSizeMode.StretchImage,
+                BackColor = Color.Transparent
             };
             topBar.Controls.Add(logoBox);
 
@@ -1303,17 +1401,19 @@ namespace ContasAPagar
                 ForeColor = Color.White,
                 Font = new Font("Segoe UI Semibold", 16F, FontStyle.Bold),
                 AutoSize = true,
-                Location = new Point(74, 11)
+                Location = new Point(74, 11),
+                BackColor = Color.Transparent
             };
             topBar.Controls.Add(lblAppTitle);
 
             Label lblAppSubtitle = new Label
             {
-                Text = "Marque com um clique (✔) as contas pagas de cada mês e acompanhe os vencimentos",
-                ForeColor = Color.FromArgb(233, 213, 255),
+                Text = "Visão Anual completa e controle mensal com checkmarks rápidos de pagamento",
+                ForeColor = Color.FromArgb(203, 213, 225),
                 Font = new Font("Segoe UI", 9.5F),
                 AutoSize = true,
-                Location = new Point(76, 41)
+                Location = new Point(76, 41),
+                BackColor = Color.Transparent
             };
             topBar.Controls.Add(lblAppSubtitle);
 
@@ -1325,18 +1425,18 @@ namespace ContasAPagar
                 FlowDirection = FlowDirection.RightToLeft,
                 WrapContents = false,
                 BackColor = Color.Transparent,
-                Padding = new Padding(0, 6, 0, 0)
+                Padding = new Padding(0, 8, 0, 0)
             };
 
-            Button btnUpdate = CreateHeaderButton("🔄 Verificar Atualizações", Color.FromArgb(147, 51, 234), Color.White, 195);
+            Button btnUpdate = CreateHeaderButton("Atualizações", Color.FromArgb(30, 41, 59), Color.FromArgb(241, 245, 249), 140, Color.FromArgb(71, 85, 105));
             btnUpdate.Click += async (s, e) => await AutoUpdater.CheckAndPromptUpdate(this, false);
             rightTopActions.Controls.Add(btnUpdate);
 
-            Button btnExportCsv = CreateHeaderButton("📥 Exportar Excel (CSV)", Color.FromArgb(126, 34, 206), Color.White, 185);
+            Button btnExportCsv = CreateHeaderButton("Exportar Excel", Color.FromArgb(30, 41, 59), Color.FromArgb(241, 245, 249), 140, Color.FromArgb(71, 85, 105));
             btnExportCsv.Click += BtnExportCsv_Click;
             rightTopActions.Controls.Add(btnExportCsv);
 
-            Button btnNewBillTop = CreateHeaderButton("➕ Nova Conta Recorrente", Color.FromArgb(22, 163, 74), Color.White, 210);
+            Button btnNewBillTop = CreateHeaderButton("+ Nova Conta", Color.FromArgb(16, 185, 129), Color.White, 150, Color.FromArgb(5, 150, 105));
             btnNewBillTop.Font = new Font("Segoe UI Semibold", 10.5F, FontStyle.Bold);
             btnNewBillTop.Click += BtnNewBill_Click;
             rightTopActions.Controls.Add(btnNewBillTop);
@@ -1344,9 +1444,9 @@ namespace ContasAPagar
             topBar.Controls.Add(rightTopActions);
 
             // -----------------------------------------------------------------
-            // 2. MONTH NAVIGATION + SUMMARY CARDS BAR
+            // 2. PERIOD NAVIGATION + SUMMARY CARDS BAR
             // -----------------------------------------------------------------
-            Panel dashboardPanel = new Panel
+            dashboardPanel = new Panel
             {
                 Dock = DockStyle.Top,
                 Height = 112,
@@ -1354,18 +1454,29 @@ namespace ContasAPagar
                 Padding = new Padding(18, 12, 18, 12)
             };
 
-            // Month Selector Box on Left
-            Panel monthBox = new Panel
+            // Period Selector Box on Left
+            monthBox = new Panel
             {
                 Location = new Point(18, 12),
-                Size = new Size(370, 88),
+                Size = new Size(365, 88),
                 BackColor = Color.White
             };
-            monthBox.Paint += PaintCardBorder;
-
-            Label lblMonthCaption = new Label
+            monthBox.Paint += (s, e) =>
             {
-                Text = "MÊS DE REFERÊNCIA DA PLANILHA",
+                Control c = (Control)s;
+                using (Pen pen = new Pen(Color.FromArgb(226, 232, 240), 1))
+                {
+                    e.Graphics.DrawRectangle(pen, 0, 0, c.Width - 1, c.Height - 1);
+                }
+                using (SolidBrush acc = new SolidBrush(Color.FromArgb(16, 185, 129)))
+                {
+                    e.Graphics.FillRectangle(acc, 0, 0, 4, c.Height);
+                }
+            };
+
+            lblMonthCaption = new Label
+            {
+                Text = "ANO DE REFERÊNCIA (VISÃO ANUAL)",
                 Font = new Font("Segoe UI Semibold", 8.5F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(100, 116, 139),
                 Location = new Point(14, 10),
@@ -1385,13 +1496,13 @@ namespace ContasAPagar
                 Cursor = Cursors.Hand
             };
             btnPrevMonth.FlatAppearance.BorderSize = 0;
-            btnPrevMonth.Click += (s, e) => ShiftMonth(-1);
+            btnPrevMonth.Click += (s, e) => ShiftPeriod(-1);
             monthBox.Controls.Add(btnPrevMonth);
 
             cmbMonthSelect = new ComboBox
             {
-                Location = new Point(58, 38),
-                Size = new Size(132, 34),
+                Location = new Point(56, 38),
+                Size = new Size(130, 34),
                 Font = new Font("Segoe UI Semibold", 11F, FontStyle.Bold),
                 DropDownStyle = ComboBoxStyle.DropDownList
             };
@@ -1407,8 +1518,8 @@ namespace ContasAPagar
 
             numYearSelect = new NumericUpDown
             {
-                Location = new Point(196, 38),
-                Size = new Size(78, 34),
+                Location = new Point(192, 38),
+                Size = new Size(76, 34),
                 Font = new Font("Segoe UI Semibold", 11F, FontStyle.Bold),
                 Minimum = 2020,
                 Maximum = 2100,
@@ -1425,7 +1536,7 @@ namespace ContasAPagar
             Button btnNextMonth = new Button
             {
                 Text = "▶",
-                Location = new Point(280, 34),
+                Location = new Point(274, 34),
                 Size = new Size(38, 38),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(241, 245, 249),
@@ -1434,17 +1545,17 @@ namespace ContasAPagar
                 Cursor = Cursors.Hand
             };
             btnNextMonth.FlatAppearance.BorderSize = 0;
-            btnNextMonth.Click += (s, e) => ShiftMonth(1);
+            btnNextMonth.Click += (s, e) => ShiftPeriod(1);
             monthBox.Controls.Add(btnNextMonth);
 
             Button btnTodayMonth = new Button
             {
                 Text = "Hoje",
-                Location = new Point(322, 34),
-                Size = new Size(40, 38),
+                Location = new Point(316, 34),
+                Size = new Size(42, 38),
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(243, 232, 255),
-                ForeColor = Color.FromArgb(107, 33, 168),
+                BackColor = Color.FromArgb(209, 250, 229),
+                ForeColor = Color.FromArgb(6, 95, 70),
                 Font = new Font("Segoe UI Semibold", 8.5F, FontStyle.Bold),
                 Cursor = Cursors.Hand
             };
@@ -1460,47 +1571,55 @@ namespace ContasAPagar
 
             dashboardPanel.Controls.Add(monthBox);
 
-            // Summary Cards: Total no Mês, Total Pago, Falta Pagar
-            Panel cardTotal = CreateSummaryCard(
-                "TOTAL DO MÊS",
-                new Point(402, 12),
-                Color.FromArgb(30, 41, 59),
+            // Summary Cards: Total, Já Pago, Falta Pagar
+            cardTotal = CreateSummaryCard(
+                "TOTAL PREVISTO (ANO)",
+                new Point(395, 12),
+                Color.FromArgb(37, 99, 235), // Blue accent
+                Color.FromArgb(15, 23, 42),
+                out lblCardTotalTitle,
                 out lblCardTotalValue,
                 out lblCardTotalSub);
             dashboardPanel.Controls.Add(cardTotal);
 
-            Panel cardPaid = CreateSummaryCard(
-                "JÁ PAGO NO MÊS (✔)",
-                new Point(672, 12),
-                Color.FromArgb(22, 163, 74),
+            cardPaid = CreateSummaryCard(
+                "JÁ PAGO NO ANO ✔",
+                new Point(665, 12),
+                Color.FromArgb(16, 185, 129), // Emerald accent
+                Color.FromArgb(5, 150, 105),
+                out lblCardPaidTitle,
                 out lblCardPaidValue,
                 out lblCardPaidSub);
             dashboardPanel.Controls.Add(cardPaid);
 
-            Panel cardPending = CreateSummaryCard(
-                "FALTA PAGAR (PENDENTE)",
-                new Point(942, 12),
-                Color.FromArgb(220, 38, 38),
+            cardPending = CreateSummaryCard(
+                "RESTANTE NO ANO",
+                new Point(935, 12),
+                Color.FromArgb(225, 29, 72), // Rose accent
+                Color.FromArgb(190, 18, 60),
+                out lblCardPendingTitle,
                 out lblCardPendingValue,
                 out lblCardPendingSub);
             dashboardPanel.Controls.Add(cardPending);
 
+            dashboardPanel.Resize += DashboardPanel_Resize;
+
             // -----------------------------------------------------------------
             // 3. FILTER & TOOLBAR ROW
             // -----------------------------------------------------------------
-            Panel filterBar = new Panel
+            filterBar = new Panel
             {
                 Dock = DockStyle.Top,
                 Height = 52,
-                BackColor = Color.FromArgb(241, 245, 249),
+                BackColor = Color.FromArgb(248, 250, 252),
                 Padding = new Padding(18, 6, 18, 6)
             };
 
             lblCurrentMonthTitle = new Label
             {
-                Text = "Contas de Novembro / 2026",
+                Text = "Visão Anual Consolidada — Ano 2026",
                 Font = new Font("Segoe UI Semibold", 13F, FontStyle.Bold),
-                ForeColor = Color.FromArgb(30, 41, 59),
+                ForeColor = Color.FromArgb(15, 23, 42),
                 Location = new Point(18, 12),
                 AutoSize = true
             };
@@ -1510,18 +1629,22 @@ namespace ContasAPagar
             btnFilterAll.Click += (s, e) => SetFilter("TODAS");
             filterBar.Controls.Add(btnFilterAll);
 
-            btnFilterPending = CreateFilterChip("⏳ Pendentes", new Point(398, 9), false);
+            btnFilterPending = CreateFilterChip("Pendentes", new Point(386, 9), false);
             btnFilterPending.Click += (s, e) => SetFilter("PENDENTES");
             filterBar.Controls.Add(btnFilterPending);
 
-            btnFilterPaid = CreateFilterChip("✔ Pagas", new Point(518, 9), false);
+            btnFilterPaid = CreateFilterChip("Pagas (✔)", new Point(486, 9), false);
             btnFilterPaid.Click += (s, e) => SetFilter("PAGAS");
             filterBar.Controls.Add(btnFilterPaid);
 
-            Label lblSearchIcon = new Label
+            btnFilterOverdue = CreateFilterChip("Atrasadas (!)", new Point(586, 9), false);
+            btnFilterOverdue.Click += (s, e) => SetFilter("ATRASADAS");
+            filterBar.Controls.Add(btnFilterOverdue);
+
+            lblSearchIcon = new Label
             {
-                Text = "🔍 Buscar conta:",
-                Location = new Point(628, 14),
+                Text = "Buscar:",
+                Location = new Point(700, 14),
                 AutoSize = true,
                 Font = new Font("Segoe UI", 9.5F),
                 ForeColor = Color.FromArgb(71, 85, 105)
@@ -1530,21 +1653,21 @@ namespace ContasAPagar
 
             txtSearch = new TextBox
             {
-                Location = new Point(735, 11),
-                Size = new Size(210, 28),
+                Location = new Point(758, 11),
+                Size = new Size(180, 28),
                 Font = new Font("Segoe UI", 10F)
             };
             txtSearch.TextChanged += (s, e) => RefreshAllViews();
             filterBar.Controls.Add(txtSearch);
 
-            Button btnEditSelected = new Button
+            btnEditSelected = new Button
             {
-                Text = "✏️ Editar Conta",
-                Location = new Point(960, 9),
-                Size = new Size(125, 33),
+                Text = "Editar Conta",
+                Location = new Point(950, 9),
+                Size = new Size(115, 33),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.White,
-                ForeColor = Color.FromArgb(51, 65, 85),
+                ForeColor = Color.FromArgb(30, 41, 59),
                 Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold),
                 Cursor = Cursors.Hand
             };
@@ -1552,11 +1675,11 @@ namespace ContasAPagar
             btnEditSelected.Click += BtnEditSelected_Click;
             filterBar.Controls.Add(btnEditSelected);
 
-            Button btnDeleteSelected = new Button
+            btnDeleteSelected = new Button
             {
-                Text = "🗑️ Excluir",
-                Location = new Point(1093, 9),
-                Size = new Size(105, 33),
+                Text = "Excluir",
+                Location = new Point(1075, 9),
+                Size = new Size(90, 33),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(254, 242, 242),
                 ForeColor = Color.FromArgb(185, 28, 28),
@@ -1567,56 +1690,68 @@ namespace ContasAPagar
             btnDeleteSelected.Click += BtnDeleteSelected_Click;
             filterBar.Controls.Add(btnDeleteSelected);
 
+            filterBar.Resize += FilterBar_Resize;
+
             // -----------------------------------------------------------------
             // 4. STATUS FOOTER BAR
             // -----------------------------------------------------------------
             Panel footerBar = new Panel
             {
                 Dock = DockStyle.Bottom,
-                Height = 34,
-                BackColor = Color.FromArgb(226, 232, 240),
-                Padding = new Padding(18, 6, 18, 6)
+                Height = 36,
+                BackColor = Color.FromArgb(241, 245, 249),
+                Padding = new Padding(18, 8, 18, 8)
             };
 
             lblStatusFooter = new Label
             {
-                Text = "💡 Dica: Clique na caixinha da coluna 'PAGA?' para marcar ou desmarcar o pagamento do mês. Duplo clique na linha para editar a conta.",
+                Text = "Dica: Na Visão Anual, clique em qualquer mês (Jan a Dez) para marcar ou desmarcar o pagamento (✔). Duplo clique na conta para editar.",
                 AutoSize = true,
-                Location = new Point(18, 7),
+                Location = new Point(18, 9),
                 Font = new Font("Segoe UI", 9F),
                 ForeColor = Color.FromArgb(51, 65, 85)
             };
             footerBar.Controls.Add(lblStatusFooter);
 
             // -----------------------------------------------------------------
-            // 5. MAIN TAB CONTROL (Planilha do Mês & Visão Anual)
+            // 5. MAIN TAB CONTROL (Visão Anual como Principal + Detalhes do Mês)
             // -----------------------------------------------------------------
             Panel mainContainer = new Panel
             {
                 Dock = DockStyle.Fill,
-                Padding = new Padding(18, 4, 18, 10)
+                Padding = new Padding(18, 4, 18, 10),
+                BackColor = Color.FromArgb(248, 250, 252)
             };
 
             tabControl = new TabControl
             {
                 Dock = DockStyle.Fill,
-                Font = new Font("Segoe UI Semibold", 10.5F, FontStyle.Bold),
-                ItemSize = new Size(260, 34),
-                SizeMode = TabSizeMode.Fixed
+                Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold),
+                ItemSize = new Size(270, 42),
+                SizeMode = TabSizeMode.Fixed,
+                DrawMode = TabDrawMode.OwnerDrawFixed
+            };
+            tabControl.DrawItem += TabControl_DrawItem;
+            tabControl.SelectedIndexChanged += (s, e) =>
+            {
+                SyncTabContext();
+                RefreshAllViews();
             };
 
-            TabPage tabMonthly = new TabPage("📋 Planilha Mensal de Contas");
-            tabMonthly.BackColor = Color.White;
-            gridMonthly = CreateMonthlySpreadsheetGrid();
-            tabMonthly.Controls.Add(gridMonthly);
-
-            TabPage tabAnnual = new TabPage("📅 Visão Anual (Janeiro a Dezembro)");
+            TabPage tabAnnual = new TabPage("Visão Anual (Principal)");
             tabAnnual.BackColor = Color.White;
             gridAnnual = CreateAnnualMatrixGrid();
             tabAnnual.Controls.Add(gridAnnual);
 
-            tabControl.TabPages.Add(tabMonthly);
+            TabPage tabMonthly = new TabPage("Detalhes do Mês (Planilha)");
+            tabMonthly.BackColor = Color.White;
+            gridMonthly = CreateMonthlySpreadsheetGrid();
+            tabMonthly.Controls.Add(gridMonthly);
+
+            // Aba Anual como Principal (Tab 0) e Detalhes do Mês como Segunda (Tab 1)
             tabControl.TabPages.Add(tabAnnual);
+            tabControl.TabPages.Add(tabMonthly);
+            tabControl.SelectedIndex = 0;
             mainContainer.Controls.Add(tabControl);
 
             // Add in proper WinForms Dock order
@@ -1655,17 +1790,17 @@ namespace ContasAPagar
                 dgv,
                 new object[] { true });
 
-            dgv.ColumnHeadersHeight = 42;
+            dgv.ColumnHeadersHeight = 44;
             dgv.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
             dgv.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
             {
-                BackColor = Color.FromArgb(241, 245, 249),
-                ForeColor = Color.FromArgb(30, 41, 59),
+                BackColor = Color.FromArgb(248, 250, 252),
+                ForeColor = Color.FromArgb(51, 65, 85),
                 Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold),
                 Alignment = DataGridViewContentAlignment.MiddleLeft,
                 Padding = new Padding(8, 0, 8, 0),
-                SelectionBackColor = Color.FromArgb(241, 245, 249),
-                SelectionForeColor = Color.FromArgb(30, 41, 59)
+                SelectionBackColor = Color.FromArgb(248, 250, 252),
+                SelectionForeColor = Color.FromArgb(51, 65, 85)
             };
 
             dgv.DefaultCellStyle = new DataGridViewCellStyle
@@ -1673,8 +1808,8 @@ namespace ContasAPagar
                 BackColor = Color.White,
                 ForeColor = Color.FromArgb(30, 41, 59),
                 Font = new Font("Segoe UI", 10.5F),
-                SelectionBackColor = Color.FromArgb(243, 232, 255),
-                SelectionForeColor = Color.FromArgb(30, 41, 59),
+                SelectionBackColor = Color.FromArgb(241, 245, 249),
+                SelectionForeColor = Color.FromArgb(15, 23, 42),
                 Padding = new Padding(8, 0, 8, 0)
             };
 
@@ -1821,7 +1956,7 @@ namespace ContasAPagar
                 MultiSelect = false,
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
                 EnableHeadersVisualStyles = false,
-                RowTemplate = { Height = 40 }
+                RowTemplate = { Height = 44 }
             };
 
             typeof(DataGridView).InvokeMember(
@@ -1831,33 +1966,47 @@ namespace ContasAPagar
                 dgv,
                 new object[] { true });
 
-            dgv.ColumnHeadersHeight = 40;
+            dgv.ColumnHeadersHeight = 44;
+            dgv.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
             dgv.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
             {
-                BackColor = Color.FromArgb(241, 245, 249),
+                BackColor = Color.FromArgb(248, 250, 252),
+                ForeColor = Color.FromArgb(51, 65, 85),
+                Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold),
+                Alignment = DataGridViewContentAlignment.MiddleCenter,
+                SelectionBackColor = Color.FromArgb(248, 250, 252),
+                SelectionForeColor = Color.FromArgb(51, 65, 85)
+            };
+
+            dgv.DefaultCellStyle = new DataGridViewCellStyle
+            {
+                BackColor = Color.White,
                 ForeColor = Color.FromArgb(30, 41, 59),
                 Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold),
+                SelectionBackColor = Color.FromArgb(241, 245, 249),
+                SelectionForeColor = Color.FromArgb(15, 23, 42),
                 Alignment = DataGridViewContentAlignment.MiddleCenter
             };
 
             var colBill = new DataGridViewTextBoxColumn
             {
                 Name = "AnnualBillName",
-                HeaderText = "CONTA (CLIQUE NO MÊS PARA MARCAR ✔)",
-                FillWeight = 170,
+                HeaderText = "CONTA / DESCRIÇÃO (CLIQUE NO MÊS PARA ✔)",
+                FillWeight = 165,
                 MinimumWidth = 190,
                 ReadOnly = true
             };
             colBill.DefaultCellStyle.Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold);
-            colBill.DefaultCellStyle.Padding = new Padding(8, 0, 4, 0);
+            colBill.DefaultCellStyle.Padding = new Padding(10, 0, 4, 0);
+            colBill.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleLeft;
             dgv.Columns.Add(colBill);
 
             var colDue = new DataGridViewTextBoxColumn
             {
                 Name = "AnnualDueDay",
-                HeaderText = "DIA VENC.",
-                FillWeight = 55,
-                MinimumWidth = 70,
+                HeaderText = "VENC.",
+                FillWeight = 48,
+                MinimumWidth = 65,
                 ReadOnly = true
             };
             colDue.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
@@ -1870,7 +2019,7 @@ namespace ContasAPagar
                     Name = "Month_" + m,
                     HeaderText = ShortMonths[m - 1].ToUpper(),
                     FillWeight = 50,
-                    MinimumWidth = 62,
+                    MinimumWidth = 64,
                     ReadOnly = true
                 };
                 colM.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
@@ -1878,7 +2027,24 @@ namespace ContasAPagar
                 dgv.Columns.Add(colM);
             }
 
+            var colTotal = new DataGridViewTextBoxColumn
+            {
+                Name = "AnnualTotal",
+                HeaderText = "TOTAL NO ANO",
+                FillWeight = 78,
+                MinimumWidth = 110,
+                ReadOnly = true
+            };
+            colTotal.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+            colTotal.DefaultCellStyle.Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold);
+            colTotal.DefaultCellStyle.Padding = new Padding(0, 0, 10, 0);
+            colTotal.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleRight;
+            dgv.Columns.Add(colTotal);
+
+            dgv.CellPainting += DgvAnnual_CellPainting;
             dgv.CellClick += DgvAnnual_CellClick;
+            dgv.CellDoubleClick += DgvAnnual_CellDoubleClick;
+            dgv.ColumnHeaderMouseClick += DgvAnnual_ColumnHeaderMouseClick;
             return dgv;
         }
 
@@ -1890,13 +2056,29 @@ namespace ContasAPagar
             isPopulating = true;
             try
             {
-                lblCurrentMonthTitle.Text = string.Format("Planilha de {0} de {1}", FullMonths[selectedMonth - 1], selectedYear);
+                SyncTabContext();
                 PopulateMonthlyGrid();
                 PopulateAnnualGrid();
             }
             finally
             {
                 isPopulating = false;
+            }
+        }
+
+        private void SyncTabContext()
+        {
+            if (tabControl.SelectedIndex == 0)
+            {
+                lblMonthCaption.Text = "ANO DE REFERÊNCIA (VISÃO ANUAL)";
+                lblCurrentMonthTitle.Text = string.Format("Visão Anual Consolidada — Ano {0}", selectedYear);
+                lblStatusFooter.Text = "• Dica: Na Visão Anual, clique em qualquer mês (Jan a Dez) para marcar ou desmarcar o pagamento (✔). Duplo clique na conta para editar.";
+            }
+            else
+            {
+                lblMonthCaption.Text = "MÊS DE REFERÊNCIA DA PLANILHA";
+                lblCurrentMonthTitle.Text = string.Format("Planilha de {0} de {1}", FullMonths[selectedMonth - 1], selectedYear);
+                lblStatusFooter.Text = "• Dica: Marque a caixinha '✔ PAGA?' para marcar como paga. Você também pode alterar o valor do mês diretamente na planilha.";
             }
         }
 
@@ -1944,9 +2126,14 @@ namespace ContasAPagar
                     countPending++;
                 }
 
+                DateTime dueDate = bill.GetDueDateForMonth(selectedYear, selectedMonth);
+                DateTime today = DateTime.Today;
+                bool isOverdue = !isPaid && dueDate < today;
+
                 // Filter check
                 if (currentFilter == "PENDENTES" && isPaid) continue;
                 if (currentFilter == "PAGAS" && !isPaid) continue;
+                if (currentFilter == "ATRASADAS" && !isOverdue) continue;
 
                 if (!string.IsNullOrEmpty(search))
                 {
@@ -1956,7 +2143,6 @@ namespace ContasAPagar
                     if (!match) continue;
                 }
 
-                DateTime dueDate = bill.GetDueDateForMonth(selectedYear, selectedMonth);
                 string dueDateFormatted = dueDate.ToString("dd/MM/yyyy");
 
                 string recurrenceText = bill.RecurrenceCount > 0
@@ -1970,7 +2156,6 @@ namespace ContasAPagar
                 Color statusFore;
                 Color rowBack;
 
-                DateTime today = DateTime.Today;
                 if (isPaid)
                 {
                     statusText = "✔ PAGA";
@@ -1981,14 +2166,14 @@ namespace ContasAPagar
                 else if (dueDate < today)
                 {
                     int daysLate = (today - dueDate).Days;
-                    statusText = string.Format("⚠️ ATRASADA ({0}d)", daysLate);
+                    statusText = string.Format("! ATRASADA ({0}d)", daysLate);
                     statusBack = Color.FromArgb(254, 226, 226);
                     statusFore = Color.FromArgb(185, 28, 28);
                     rowBack = Color.FromArgb(255, 250, 250);
                 }
                 else if (dueDate == today)
                 {
-                    statusText = "⏰ VENCE HOJE!";
+                    statusText = "VENCE HOJE!";
                     statusBack = Color.FromArgb(254, 243, 199);
                     statusFore = Color.FromArgb(180, 83, 9);
                     rowBack = Color.FromArgb(255, 253, 245);
@@ -1997,7 +2182,7 @@ namespace ContasAPagar
                 {
                     int daysLeft = (dueDate - today).Days;
                     statusText = daysLeft <= 5
-                        ? string.Format("⏳ Vence em {0} dia(s)", daysLeft)
+                        ? string.Format("Vence em {0} dia(s)", daysLeft)
                         : "Em aberto";
                     statusBack = Color.FromArgb(241, 245, 249);
                     statusFore = Color.FromArgb(71, 85, 105);
@@ -2050,23 +2235,30 @@ namespace ContasAPagar
                 }
             }
 
-            // Update Summary Cards
-            CultureInfo ptBr = new CultureInfo("pt-BR");
-            lblCardTotalValue.Text = totalMonth.ToString("C2", ptBr);
-            lblCardTotalSub.Text = string.Format("{0} conta(s) neste mês", countTotal);
+            // Update Summary Cards if Detalhes do Mês is the active tab
+            if (tabControl.SelectedIndex == 1)
+            {
+                CultureInfo ptBr = new CultureInfo("pt-BR");
+                lblCardTotalTitle.Text = string.Format("TOTAL NO MÊS ({0})", ShortMonths[selectedMonth - 1].ToUpper());
+                lblCardTotalValue.Text = totalMonth.ToString("C2", ptBr);
+                lblCardTotalSub.Text = string.Format("{0} conta(s) neste mês", countTotal);
 
-            lblCardPaidValue.Text = totalPaid.ToString("C2", ptBr);
-            lblCardPaidSub.Text = string.Format("{0} de {1} conta(s) pagas", countPaid, countTotal);
+                lblCardPaidTitle.Text = string.Format("JÁ PAGO NO MÊS ({0}) ✔", ShortMonths[selectedMonth - 1].ToUpper());
+                lblCardPaidValue.Text = totalPaid.ToString("C2", ptBr);
+                lblCardPaidSub.Text = string.Format("{0} de {1} conta(s) pagas", countPaid, countTotal);
 
-            lblCardPendingValue.Text = totalPending.ToString("C2", ptBr);
-            lblCardPendingSub.Text = countPending == 0 && countTotal > 0
-                ? "🎉 Tudo pago neste mês!"
-                : string.Format("{0} conta(s) pendente(s)", countPending);
+                lblCardPendingTitle.Text = string.Format("FALTA PAGAR ({0})", ShortMonths[selectedMonth - 1].ToUpper());
+                lblCardPendingValue.Text = totalPending.ToString("C2", ptBr);
+                lblCardPendingSub.Text = countPending == 0 && countTotal > 0
+                    ? "✔ Tudo pago neste mês!"
+                    : string.Format("{0} conta(s) pendente(s)", countPending);
+            }
         }
 
         private void PopulateAnnualGrid()
         {
             gridAnnual.Rows.Clear();
+            CultureInfo ptBr = new CultureInfo("pt-BR");
 
             var orderedBills = db.Bills
                 .Where(b => b.Active)
@@ -2074,9 +2266,78 @@ namespace ContasAPagar
                 .ThenBy(b => b.Name)
                 .ToList();
 
+            string search = (txtSearch.Text ?? "").Trim().ToLowerInvariant();
+
+            decimal[] monthTotals = new decimal[12];
+            decimal[] monthPaidTotals = new decimal[12];
+            decimal grandYearTotal = 0m;
+            decimal grandYearPaid = 0m;
+            int totalActiveBillsInYear = 0;
+            int totalYearInstallments = 0;
+            int totalYearPaidInstallments = 0;
+
             foreach (var bill in orderedBills)
             {
-                object[] rowVals = new object[14];
+                // Check if applies to any month in selectedYear
+                bool appliesInYear = false;
+                decimal billYearTotal = 0m;
+                int billPaidCount = 0;
+                int billTotalCount = 0;
+                bool billHasOverdue = false;
+                bool billHasPending = false;
+
+                for (int m = 1; m <= 12; m++)
+                {
+                    int inst;
+                    if (bill.AppliesToMonth(selectedYear, m, out inst))
+                    {
+                        appliesInYear = true;
+                        billTotalCount++;
+                        var rec = GetOrCreatePaymentRecord(bill.Id, selectedYear, m, false);
+                        bool isPaid = rec != null && rec.IsPaid;
+                        decimal amount = (rec != null && rec.CustomAmount > 0) ? rec.CustomAmount : bill.Amount;
+                        billYearTotal += amount;
+                        monthTotals[m - 1] += amount;
+
+                        DateTime dueDate = bill.GetDueDateForMonth(selectedYear, m);
+                        if (isPaid)
+                        {
+                            billPaidCount++;
+                            monthPaidTotals[m - 1] += amount;
+                        }
+                        else
+                        {
+                            billHasPending = true;
+                            if (dueDate < DateTime.Today)
+                            {
+                                billHasOverdue = true;
+                            }
+                        }
+                    }
+                }
+
+                if (!appliesInYear) continue;
+
+                totalActiveBillsInYear++;
+                grandYearTotal += billYearTotal;
+                totalYearInstallments += billTotalCount;
+                totalYearPaidInstallments += billPaidCount;
+
+                // Search check
+                if (!string.IsNullOrEmpty(search))
+                {
+                    bool match = (bill.Name ?? "").ToLowerInvariant().Contains(search) ||
+                                 (bill.Category ?? "").ToLowerInvariant().Contains(search) ||
+                                 (bill.Notes ?? "").ToLowerInvariant().Contains(search);
+                    if (!match) continue;
+                }
+
+                // Filter check for Annual View
+                if (currentFilter == "PENDENTES" && !billHasPending) continue;
+                if (currentFilter == "PAGAS" && (billHasPending || billTotalCount == 0)) continue;
+                if (currentFilter == "ATRASADAS" && !billHasOverdue) continue;
+
+                object[] rowVals = new object[15];
                 string recInfo = bill.RecurrenceCount > 0 ? string.Format(" ({0}x)", bill.RecurrenceCount) : " (Fixa)";
                 rowVals[0] = bill.Name + recInfo;
                 rowVals[1] = "Dia " + bill.DueDay.ToString("00");
@@ -2095,45 +2356,73 @@ namespace ContasAPagar
                         DateTime dueDate = bill.GetDueDateForMonth(selectedYear, m);
                         rowVals[m + 1] = paid
                             ? string.Format("✔ {0:00}/{1:00}", dueDate.Day, m)
-                            : string.Format("⬜ {0:00}/{1:00}", dueDate.Day, m);
+                            : string.Format("{0:00}/{1:00}", dueDate.Day, m);
                     }
                 }
+                rowVals[14] = billYearTotal.ToString("C2", ptBr);
 
                 int idx = gridAnnual.Rows.Add(rowVals);
                 DataGridViewRow row = gridAnnual.Rows[idx];
                 row.Tag = bill.Id;
+            }
 
+            // Summary rows at the bottom
+            grandYearPaid = monthPaidTotals.Sum();
+            decimal grandYearPending = grandYearTotal - grandYearPaid;
+
+            if (gridAnnual.Rows.Count > 0)
+            {
+                // Summary Row 1: Total Previsto por Mês
+                object[] sumTotalVals = new object[15];
+                sumTotalVals[0] = "∑ TOTAL ESTIMADO DO MÊS";
+                sumTotalVals[1] = "—";
                 for (int m = 1; m <= 12; m++)
                 {
-                    int inst;
-                    var cell = row.Cells[m + 1];
-                    if (!bill.AppliesToMonth(selectedYear, m, out inst))
-                    {
-                        cell.Style.BackColor = Color.FromArgb(248, 250, 252);
-                        cell.Style.ForeColor = Color.FromArgb(203, 213, 225);
-                    }
-                    else
-                    {
-                        var rec = GetOrCreatePaymentRecord(bill.Id, selectedYear, m, false);
-                        bool paid = rec != null && rec.IsPaid;
-                        DateTime dueDate = bill.GetDueDateForMonth(selectedYear, m);
-                        if (paid)
-                        {
-                            cell.Style.BackColor = Color.FromArgb(220, 252, 231);
-                            cell.Style.ForeColor = Color.FromArgb(21, 128, 61);
-                        }
-                        else if (dueDate < DateTime.Today)
-                        {
-                            cell.Style.BackColor = Color.FromArgb(254, 226, 226);
-                            cell.Style.ForeColor = Color.FromArgb(185, 28, 28);
-                        }
-                        else
-                        {
-                            cell.Style.BackColor = Color.White;
-                            cell.Style.ForeColor = Color.FromArgb(51, 65, 85);
-                        }
-                    }
+                    sumTotalVals[m + 1] = monthTotals[m - 1] > 0 ? monthTotals[m - 1].ToString("C0", ptBr) : "R$ 0";
                 }
+                sumTotalVals[14] = grandYearTotal.ToString("C2", ptBr);
+
+                int sIdx1 = gridAnnual.Rows.Add(sumTotalVals);
+                DataGridViewRow sRow1 = gridAnnual.Rows[sIdx1];
+                sRow1.Tag = "SUMMARY_TOTAL";
+                sRow1.DefaultCellStyle.BackColor = Color.FromArgb(241, 245, 249);
+                sRow1.DefaultCellStyle.ForeColor = Color.FromArgb(15, 23, 42);
+                sRow1.DefaultCellStyle.Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold);
+
+                // Summary Row 2: Total Pago por Mês
+                object[] sumPaidVals = new object[15];
+                sumPaidVals[0] = "✔ JÁ PAGO NO MÊS";
+                sumPaidVals[1] = "—";
+                for (int m = 1; m <= 12; m++)
+                {
+                    sumPaidVals[m + 1] = monthPaidTotals[m - 1] > 0 ? monthPaidTotals[m - 1].ToString("C0", ptBr) : "R$ 0";
+                }
+                sumPaidVals[14] = grandYearPaid.ToString("C2", ptBr);
+
+                int sIdx2 = gridAnnual.Rows.Add(sumPaidVals);
+                DataGridViewRow sRow2 = gridAnnual.Rows[sIdx2];
+                sRow2.Tag = "SUMMARY_PAID";
+                sRow2.DefaultCellStyle.BackColor = Color.FromArgb(240, 253, 244);
+                sRow2.DefaultCellStyle.ForeColor = Color.FromArgb(21, 128, 61);
+                sRow2.DefaultCellStyle.Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold);
+            }
+
+            // If Visão Anual is the active tab, update the Dashboard Summary Cards with Year stats
+            if (tabControl.SelectedIndex == 0)
+            {
+                lblCardTotalTitle.Text = string.Format("TOTAL PREVISTO ({0})", selectedYear);
+                lblCardTotalValue.Text = grandYearTotal.ToString("C2", ptBr);
+                lblCardTotalSub.Text = string.Format("{0} conta(s) ativas no ano", totalActiveBillsInYear);
+
+                lblCardPaidTitle.Text = string.Format("JÁ PAGO NO ANO ({0}) ✔", selectedYear);
+                lblCardPaidValue.Text = grandYearPaid.ToString("C2", ptBr);
+                lblCardPaidSub.Text = string.Format("{0} de {1} parcelas pagas", totalYearPaidInstallments, totalYearInstallments);
+
+                lblCardPendingTitle.Text = string.Format("RESTANTE NO ANO ({0})", selectedYear);
+                lblCardPendingValue.Text = grandYearPending.ToString("C2", ptBr);
+                lblCardPendingSub.Text = grandYearPending <= 0 && grandYearTotal > 0
+                    ? "✔ Todas as contas quitadas!"
+                    : string.Format("{0} parcelas pendentes", totalYearInstallments - totalYearPaidInstallments);
             }
         }
 
@@ -2190,12 +2479,12 @@ namespace ContasAPagar
 
         private void DgvAnnual_CellClick(object sender, DataGridViewCellEventArgs e)
         {
-            if (isPopulating || e.RowIndex < 0 || e.ColumnIndex < 2) return;
+            if (isPopulating || e.RowIndex < 0 || e.ColumnIndex < 2 || e.ColumnIndex > 13) return;
+
+            string billId = gridAnnual.Rows[e.RowIndex].Tag as string;
+            if (string.IsNullOrEmpty(billId) || billId.StartsWith("SUMMARY_")) return;
 
             int monthClicked = e.ColumnIndex - 1; // 1..12
-            string billId = gridAnnual.Rows[e.RowIndex].Tag as string;
-            if (string.IsNullOrEmpty(billId)) return;
-
             var bill = db.Bills.FirstOrDefault(b => b.Id == billId);
             if (bill == null) return;
 
@@ -2208,6 +2497,240 @@ namespace ContasAPagar
 
             StorageService.Save(db);
             RefreshAllViews();
+
+            lblStatusFooter.Text = string.Format("✔ Conta '{0}' marcada como {1} em {2}/{3}!",
+                bill.Name,
+                rec.IsPaid ? "PAGA" : "PENDENTE",
+                ShortMonths[monthClicked - 1],
+                selectedYear);
+        }
+
+        private void DgvAnnual_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0) return;
+            string billId = gridAnnual.Rows[e.RowIndex].Tag as string;
+            if (string.IsNullOrEmpty(billId) || billId.StartsWith("SUMMARY_")) return;
+
+            BtnEditSelected_Click(sender, EventArgs.Empty);
+        }
+
+        private void DgvAnnual_ColumnHeaderMouseClick(object sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.ColumnIndex >= 2 && e.ColumnIndex <= 13)
+            {
+                int monthClicked = e.ColumnIndex - 1;
+                selectedMonth = monthClicked;
+                SyncMonthYearControls();
+                RefreshAllViews();
+                lblStatusFooter.Text = string.Format("• Dica: Mês alterado para {0}/{1}. Para ver a planilha detalhada deste mês, abra a aba 'Detalhes do Mês'.", FullMonths[selectedMonth - 1], selectedYear);
+            }
+        }
+
+        private void DgvAnnual_CellPainting(object sender, DataGridViewCellPaintingEventArgs e)
+        {
+            if (e.RowIndex < 0)
+            {
+                // Column Headers
+                if (e.ColumnIndex >= 2 && e.ColumnIndex <= 13)
+                {
+                    int m = e.ColumnIndex - 1;
+                    bool isCurrentMonth = (m == DateTime.Now.Month && selectedYear == DateTime.Now.Year);
+                    bool isSelectedMonth = (m == selectedMonth);
+
+                    // Paint background
+                    Color headerBg = isCurrentMonth
+                        ? Color.FromArgb(236, 253, 245)
+                        : (isSelectedMonth ? Color.FromArgb(241, 245, 249) : Color.FromArgb(248, 250, 252));
+
+                    using (SolidBrush b = new SolidBrush(headerBg))
+                    {
+                        e.Graphics.FillRectangle(b, e.CellBounds);
+                    }
+
+                    // Grid borders
+                    using (Pen borderPen = new Pen(Color.FromArgb(226, 232, 240)))
+                    {
+                        e.Graphics.DrawLine(borderPen, e.CellBounds.Right - 1, e.CellBounds.Top, e.CellBounds.Right - 1, e.CellBounds.Bottom - 1);
+                        e.Graphics.DrawLine(borderPen, e.CellBounds.Left, e.CellBounds.Bottom - 1, e.CellBounds.Right, e.CellBounds.Bottom - 1);
+                    }
+
+                    // If current month, draw green indicator bar at top
+                    if (isCurrentMonth)
+                    {
+                        using (SolidBrush topBar = new SolidBrush(Color.FromArgb(16, 185, 129)))
+                        {
+                            e.Graphics.FillRectangle(topBar, e.CellBounds.Left, e.CellBounds.Top, e.CellBounds.Width, 3);
+                        }
+                    }
+
+                    // Text
+                    string headerText = ShortMonths[m - 1].ToUpper();
+                    if (isCurrentMonth) headerText = "● " + headerText;
+
+                    Color textCol = isCurrentMonth ? Color.FromArgb(4, 120, 87) : Color.FromArgb(51, 65, 85);
+                    Font f = isCurrentMonth
+                        ? new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold)
+                        : new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold);
+
+                    TextRenderer.DrawText(
+                        e.Graphics,
+                        headerText,
+                        f,
+                        e.CellBounds,
+                        textCol,
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+
+                    e.Handled = true;
+                    return;
+                }
+                return;
+            }
+
+            DataGridViewRow row = gridAnnual.Rows[e.RowIndex];
+            string tag = row.Tag as string;
+
+            // Check if this is a summary row
+            if (tag != null && tag.StartsWith("SUMMARY_"))
+            {
+                bool isPaidRow = tag == "SUMMARY_PAID";
+                Color sumBg = isPaidRow ? Color.FromArgb(240, 253, 244) : Color.FromArgb(241, 245, 249);
+                Color sumTextCol = isPaidRow ? Color.FromArgb(21, 128, 61) : Color.FromArgb(15, 23, 42);
+
+                using (SolidBrush b = new SolidBrush(sumBg))
+                {
+                    e.Graphics.FillRectangle(b, e.CellBounds);
+                }
+
+                using (Pen p = new Pen(Color.FromArgb(226, 232, 240)))
+                {
+                    e.Graphics.DrawLine(p, e.CellBounds.Left, e.CellBounds.Top, e.CellBounds.Right, e.CellBounds.Top);
+                    e.Graphics.DrawLine(p, e.CellBounds.Left, e.CellBounds.Bottom - 1, e.CellBounds.Right, e.CellBounds.Bottom - 1);
+                    e.Graphics.DrawLine(p, e.CellBounds.Right - 1, e.CellBounds.Top, e.CellBounds.Right - 1, e.CellBounds.Bottom - 1);
+                }
+
+                string val = Convert.ToString(e.Value) ?? "";
+                TextFormatFlags flags = TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine;
+                if (e.ColumnIndex == 0)
+                {
+                    flags |= TextFormatFlags.Left;
+                    Rectangle padRect = new Rectangle(e.CellBounds.Left + 10, e.CellBounds.Top, e.CellBounds.Width - 14, e.CellBounds.Height);
+                    TextRenderer.DrawText(e.Graphics, val, new Font("Segoe UI Semibold", 10F, FontStyle.Bold), padRect, sumTextCol, flags);
+                }
+                else if (e.ColumnIndex == 14)
+                {
+                    flags |= TextFormatFlags.Right;
+                    Rectangle padRect = new Rectangle(e.CellBounds.Left, e.CellBounds.Top, e.CellBounds.Width - 10, e.CellBounds.Height);
+                    TextRenderer.DrawText(e.Graphics, val, new Font("Segoe UI Semibold", 10.5F, FontStyle.Bold), padRect, sumTextCol, flags);
+                }
+                else
+                {
+                    flags |= TextFormatFlags.HorizontalCenter;
+                    TextRenderer.DrawText(e.Graphics, val, new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold), e.CellBounds, sumTextCol, flags);
+                }
+
+                e.Handled = true;
+                return;
+            }
+
+            // Bill row: Handle Month columns (2..13)
+            if (e.ColumnIndex >= 2 && e.ColumnIndex <= 13)
+            {
+                int m = e.ColumnIndex - 1;
+                Color rowBg = (e.RowIndex % 2 == 0) ? Color.White : Color.FromArgb(250, 252, 255);
+                using (SolidBrush b = new SolidBrush(rowBg))
+                {
+                    e.Graphics.FillRectangle(b, e.CellBounds);
+                }
+
+                using (Pen p = new Pen(Color.FromArgb(241, 245, 249)))
+                {
+                    e.Graphics.DrawLine(p, e.CellBounds.Left, e.CellBounds.Bottom - 1, e.CellBounds.Right, e.CellBounds.Bottom - 1);
+                    e.Graphics.DrawLine(p, e.CellBounds.Right - 1, e.CellBounds.Top, e.CellBounds.Right - 1, e.CellBounds.Bottom - 1);
+                }
+
+                string val = Convert.ToString(e.Value) ?? "";
+                if (val == "—" || string.IsNullOrEmpty(val))
+                {
+                    TextRenderer.DrawText(
+                        e.Graphics,
+                        "—",
+                        new Font("Segoe UI", 11F),
+                        e.CellBounds,
+                        Color.FromArgb(203, 213, 225),
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                    e.Handled = true;
+                    return;
+                }
+
+                // Determine state from bill and payment
+                string billId = tag;
+                var bill = db.Bills.FirstOrDefault(b => b.Id == billId);
+                if (bill != null)
+                {
+                    var rec = GetOrCreatePaymentRecord(billId, selectedYear, m, false);
+                    bool isPaid = rec != null && rec.IsPaid;
+                    DateTime dueDate = bill.GetDueDateForMonth(selectedYear, m);
+                    DateTime today = DateTime.Today;
+
+                    Color pillBg;
+                    Color pillBorder;
+                    Color pillText;
+                    string pillLabel;
+
+                    if (isPaid)
+                    {
+                        pillBg = Color.FromArgb(220, 252, 231);
+                        pillBorder = Color.FromArgb(134, 239, 172);
+                        pillText = Color.FromArgb(21, 128, 61);
+                        pillLabel = string.Format("✔ {0:00}/{1:00}", dueDate.Day, m);
+                    }
+                    else if (dueDate < today)
+                    {
+                        pillBg = Color.FromArgb(254, 226, 226);
+                        pillBorder = Color.FromArgb(252, 165, 165);
+                        pillText = Color.FromArgb(185, 28, 28);
+                        pillLabel = string.Format("! {0:00}/{1:00}", dueDate.Day, m);
+                    }
+                    else if (dueDate == today)
+                    {
+                        pillBg = Color.FromArgb(254, 243, 199);
+                        pillBorder = Color.FromArgb(252, 211, 77);
+                        pillText = Color.FromArgb(180, 83, 9);
+                        pillLabel = "HOJE";
+                    }
+                    else
+                    {
+                        pillBg = Color.FromArgb(241, 245, 249);
+                        pillBorder = Color.FromArgb(226, 232, 240);
+                        pillText = Color.FromArgb(71, 85, 105);
+                        pillLabel = string.Format("{0:00}/{1:00}", dueDate.Day, m);
+                    }
+
+                    Rectangle pillRect = new Rectangle(e.CellBounds.Left + 4, e.CellBounds.Top + 6, e.CellBounds.Width - 8, e.CellBounds.Height - 12);
+                    using (GraphicsPath path = AppIconBuilder.RoundedRect(pillRect, 6))
+                    {
+                        using (SolidBrush pb = new SolidBrush(pillBg))
+                        {
+                            e.Graphics.FillPath(pb, path);
+                        }
+                        using (Pen pp = new Pen(pillBorder, 1))
+                        {
+                            e.Graphics.DrawPath(pp, path);
+                        }
+                    }
+
+                    TextRenderer.DrawText(
+                        e.Graphics,
+                        pillLabel,
+                        new Font("Segoe UI Semibold", 9F, FontStyle.Bold),
+                        pillRect,
+                        pillText,
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+
+                    e.Handled = true;
+                    return;
+                }
+            }
         }
 
         // ---------------------------------------------------------------------
@@ -2222,7 +2745,7 @@ namespace ContasAPagar
                     db.Bills.Add(dlg.ResultBill);
                     StorageService.Save(db);
 
-                    // Jump to the start month if user created a bill starting in another month
+                    // Jump to the start year/month if user created a bill starting elsewhere
                     selectedMonth = dlg.ResultBill.StartMonth;
                     selectedYear = dlg.ResultBill.StartYear;
                     SyncMonthYearControls();
@@ -2294,28 +2817,48 @@ namespace ContasAPagar
         {
             using (SaveFileDialog sfd = new SaveFileDialog())
             {
-                sfd.Title = "Exportar Planilha do Mês para Excel (CSV)";
+                bool isAnnual = (tabControl.SelectedIndex == 0);
+                sfd.Title = isAnnual
+                    ? "Exportar Visão Anual para Excel (CSV)"
+                    : "Exportar Planilha do Mês para Excel (CSV)";
                 sfd.Filter = "Planilha CSV (*.csv)|*.csv";
-                sfd.FileName = string.Format("Contas_{0}_{1}.csv", FullMonths[selectedMonth - 1], selectedYear);
+                sfd.FileName = isAnnual
+                    ? string.Format("Contas_Visao_Anual_{0}.csv", selectedYear)
+                    : string.Format("Contas_{0}_{1}.csv", FullMonths[selectedMonth - 1], selectedYear);
 
                 if (sfd.ShowDialog(this) == DialogResult.OK)
                 {
                     StringBuilder sb = new StringBuilder();
-                    sb.AppendLine("Paga;Data do Pagamento;Conta;Categoria;Recorrencia;Primeiro Pagamento;Valor (R$);Situacao;Observacoes");
-
-                    foreach (DataGridViewRow row in gridMonthly.Rows)
+                    if (isAnnual)
                     {
-                        bool paid = Convert.ToBoolean(row.Cells["ColPaid"].Value);
-                        sb.AppendFormat("{0};{1};{2};{3};{4};{5};{6};{7};{8}\r\n",
-                            paid ? "SIM" : "NAO",
-                             row.Cells["ColDueDate"].Value,
-                            EscapeCsv(Convert.ToString(row.Cells["ColName"].Value)),
-                            EscapeCsv(Convert.ToString(row.Cells["ColCategory"].Value)),
-                            EscapeCsv(Convert.ToString(row.Cells["ColInstallment"].Value)),
-                            EscapeCsv(Convert.ToString(row.Cells["ColStart"].Value)),
-                            row.Cells["ColAmount"].Value,
-                            EscapeCsv(Convert.ToString(row.Cells["ColStatus"].Value)),
-                            EscapeCsv(Convert.ToString(row.Cells["ColNotes"].Value)));
+                        sb.AppendLine("Conta;Vencimento;Jan;Fev;Mar;Abr;Mai;Jun;Jul;Ago;Set;Out;Nov;Dez;Total no Ano (R$)");
+                        foreach (DataGridViewRow row in gridAnnual.Rows)
+                        {
+                            List<string> cols = new List<string>();
+                            for (int c = 0; c < row.Cells.Count; c++)
+                            {
+                                cols.Add(EscapeCsv(Convert.ToString(row.Cells[c].Value)));
+                            }
+                            sb.AppendLine(string.Join(";", cols.ToArray()));
+                        }
+                    }
+                    else
+                    {
+                        sb.AppendLine("Paga;Data do Pagamento;Conta;Categoria;Recorrencia;Primeiro Pagamento;Valor (R$);Situacao;Observacoes");
+                        foreach (DataGridViewRow row in gridMonthly.Rows)
+                        {
+                            bool paid = Convert.ToBoolean(row.Cells["ColPaid"].Value);
+                            sb.AppendFormat("{0};{1};{2};{3};{4};{5};{6};{7};{8}\r\n",
+                                paid ? "SIM" : "NAO",
+                                row.Cells["ColDueDate"].Value,
+                                EscapeCsv(Convert.ToString(row.Cells["ColName"].Value)),
+                                EscapeCsv(Convert.ToString(row.Cells["ColCategory"].Value)),
+                                EscapeCsv(Convert.ToString(row.Cells["ColInstallment"].Value)),
+                                EscapeCsv(Convert.ToString(row.Cells["ColStart"].Value)),
+                                row.Cells["ColAmount"].Value,
+                                EscapeCsv(Convert.ToString(row.Cells["ColStatus"].Value)),
+                                EscapeCsv(Convert.ToString(row.Cells["ColNotes"].Value)));
+                        }
                     }
 
                     File.WriteAllText(sfd.FileName, sb.ToString(), Encoding.UTF8);
@@ -2355,22 +2898,34 @@ namespace ContasAPagar
 
         private string GetSelectedBillId()
         {
-            if (tabControl.SelectedIndex == 0 && gridMonthly.SelectedRows.Count > 0)
+            if (tabControl.SelectedIndex == 0 && gridAnnual.CurrentRow != null)
+            {
+                string tag = gridAnnual.CurrentRow.Tag as string;
+                if (!string.IsNullOrEmpty(tag) && !tag.StartsWith("SUMMARY_"))
+                {
+                    return tag;
+                }
+            }
+            if (tabControl.SelectedIndex == 1 && gridMonthly.SelectedRows.Count > 0)
             {
                 return gridMonthly.SelectedRows[0].Tag as string;
-            }
-            if (tabControl.SelectedIndex == 1 && gridAnnual.CurrentRow != null)
-            {
-                return gridAnnual.CurrentRow.Tag as string;
             }
             return null;
         }
 
-        private void ShiftMonth(int delta)
+        private void ShiftPeriod(int delta)
         {
-            DateTime dt = new DateTime(selectedYear, selectedMonth, 1).AddMonths(delta);
-            selectedMonth = dt.Month;
-            selectedYear = dt.Year;
+            if (tabControl != null && tabControl.SelectedIndex == 0)
+            {
+                selectedYear += delta;
+                selectedYear = Math.Min(2100, Math.Max(2020, selectedYear));
+            }
+            else
+            {
+                DateTime dt = new DateTime(selectedYear, selectedMonth, 1).AddMonths(delta);
+                selectedMonth = dt.Month;
+                selectedYear = dt.Year;
+            }
             SyncMonthYearControls();
             RefreshAllViews();
         }
@@ -2395,15 +2950,107 @@ namespace ContasAPagar
             StyleFilterChip(btnFilterAll, filter == "TODAS");
             StyleFilterChip(btnFilterPending, filter == "PENDENTES");
             StyleFilterChip(btnFilterPaid, filter == "PAGAS");
+            StyleFilterChip(btnFilterOverdue, filter == "ATRASADAS");
             RefreshAllViews();
         }
 
-        private static Button CreateHeaderButton(string text, Color backColor, Color foreColor, int width)
+        private void DashboardPanel_Resize(object sender, EventArgs e)
+        {
+            if (dashboardPanel == null || monthBox == null || cardTotal == null || cardPaid == null || cardPending == null) return;
+
+            int pad = 16;
+            int availableWidth = dashboardPanel.ClientSize.Width - (pad * 2);
+            int boxWidth = Math.Max(350, Math.Min(380, (int)(availableWidth * 0.28f)));
+            monthBox.Location = new Point(pad, 12);
+            monthBox.Size = new Size(boxWidth, 88);
+
+            int remainingWidth = availableWidth - boxWidth - (pad * 3);
+            int cardWidth = Math.Max(180, remainingWidth / 3);
+
+            cardTotal.Location = new Point(pad + boxWidth + pad, 12);
+            cardTotal.Size = new Size(cardWidth, 88);
+
+            cardPaid.Location = new Point(cardTotal.Right + pad, 12);
+            cardPaid.Size = new Size(cardWidth, 88);
+
+            cardPending.Location = new Point(cardPaid.Right + pad, 12);
+            cardPending.Size = new Size(cardWidth, 88);
+        }
+
+        private void FilterBar_Resize(object sender, EventArgs e)
+        {
+            if (filterBar == null || btnDeleteSelected == null || btnEditSelected == null || txtSearch == null) return;
+
+            int pad = 18;
+            int rightEdge = filterBar.ClientSize.Width - pad;
+
+            btnDeleteSelected.Location = new Point(rightEdge - btnDeleteSelected.Width, 9);
+            btnEditSelected.Location = new Point(btnDeleteSelected.Left - 8 - btnEditSelected.Width, 9);
+
+            int searchRight = btnEditSelected.Left - 16;
+            int searchWidth = Math.Max(150, Math.Min(220, searchRight - 760));
+            txtSearch.Size = new Size(searchWidth, 28);
+            txtSearch.Location = new Point(searchRight - searchWidth, 11);
+
+            if (lblSearchIcon != null)
+            {
+                lblSearchIcon.Location = new Point(txtSearch.Left - lblSearchIcon.Width - 6, 14);
+            }
+        }
+
+        private void TabControl_DrawItem(object sender, DrawItemEventArgs e)
+        {
+            TabControl tc = (TabControl)sender;
+            TabPage page = tc.TabPages[e.Index];
+            bool isSelected = tc.SelectedIndex == e.Index;
+            Rectangle tabRect = tc.GetTabRect(e.Index);
+
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
+            // Background
+            Color backColor = isSelected ? Color.White : Color.FromArgb(241, 245, 249);
+            using (SolidBrush b = new SolidBrush(backColor))
+            {
+                e.Graphics.FillRectangle(b, tabRect);
+            }
+
+            // Divider line between tabs
+            using (Pen p = new Pen(Color.FromArgb(226, 232, 240), 1))
+            {
+                e.Graphics.DrawLine(p, tabRect.Right - 1, tabRect.Top + 6, tabRect.Right - 1, tabRect.Bottom - 6);
+            }
+
+            // Active Tab bottom highlight indicator bar
+            if (isSelected)
+            {
+                using (SolidBrush indicator = new SolidBrush(Color.FromArgb(16, 185, 129))) // Emerald accent
+                {
+                    e.Graphics.FillRectangle(indicator, tabRect.Left + 8, tabRect.Bottom - 4, tabRect.Width - 16, 4);
+                }
+            }
+
+            // Tab Text
+            Color textColor = isSelected ? Color.FromArgb(15, 23, 42) : Color.FromArgb(100, 116, 139);
+            Font tabFont = isSelected
+                ? new Font("Segoe UI Semibold", 10.5F, FontStyle.Bold)
+                : new Font("Segoe UI", 10F, FontStyle.Regular);
+
+            TextRenderer.DrawText(
+                e.Graphics,
+                page.Text,
+                tabFont,
+                tabRect,
+                textColor,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+        }
+
+        private static Button CreateHeaderButton(string text, Color backColor, Color foreColor, int width, Color borderColor)
         {
             Button btn = new Button
             {
                 Text = text,
-                Size = new Size(width, 40),
+                Size = new Size(width, 42),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = backColor,
                 ForeColor = foreColor,
@@ -2411,8 +3058,19 @@ namespace ContasAPagar
                 Cursor = Cursors.Hand,
                 Margin = new Padding(8, 0, 0, 0)
             };
-            btn.FlatAppearance.BorderColor = Color.FromArgb(168, 85, 247);
+            btn.FlatAppearance.BorderColor = borderColor;
             btn.FlatAppearance.BorderSize = 1;
+            btn.MouseEnter += (s, e) =>
+            {
+                btn.BackColor = Color.FromArgb(
+                    Math.Min(255, backColor.R + 15),
+                    Math.Min(255, backColor.G + 15),
+                    Math.Min(255, backColor.B + 15));
+            };
+            btn.MouseLeave += (s, e) =>
+            {
+                btn.BackColor = backColor;
+            };
             return btn;
         }
 
@@ -2422,7 +3080,7 @@ namespace ContasAPagar
             {
                 Text = text,
                 Location = location,
-                Size = new Size(text.Length > 8 ? 112 : 80, 33),
+                Size = new Size(text.Length > 9 ? 116 : 82, 33),
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold),
                 Cursor = Cursors.Hand
@@ -2435,29 +3093,41 @@ namespace ContasAPagar
         {
             if (active)
             {
-                btn.BackColor = Color.FromArgb(126, 34, 206);
+                btn.BackColor = Color.FromArgb(15, 23, 42); // Deep Slate
                 btn.ForeColor = Color.White;
-                btn.FlatAppearance.BorderColor = Color.FromArgb(126, 34, 206);
+                btn.FlatAppearance.BorderColor = Color.FromArgb(15, 23, 42);
             }
             else
             {
                 btn.BackColor = Color.White;
                 btn.ForeColor = Color.FromArgb(71, 85, 105);
-                btn.FlatAppearance.BorderColor = Color.FromArgb(203, 213, 225);
+                btn.FlatAppearance.BorderColor = Color.FromArgb(226, 232, 240);
             }
         }
 
-        private static Panel CreateSummaryCard(string title, Point location, Color valueColor, out Label lblVal, out Label lblSub)
+        private static Panel CreateSummaryCard(string title, Point location, Color accentColor, Color textColor, out Label lblTitle, out Label lblVal, out Label lblSub)
         {
             Panel p = new Panel
             {
                 Location = location,
                 Size = new Size(256, 88),
-                BackColor = Color.White
+                BackColor = Color.White,
+                Tag = accentColor
             };
-            p.Paint += PaintCardBorder;
+            p.Paint += (s, e) =>
+            {
+                Control c = (Control)s;
+                using (Pen pen = new Pen(Color.FromArgb(226, 232, 240), 1))
+                {
+                    e.Graphics.DrawRectangle(pen, 0, 0, c.Width - 1, c.Height - 1);
+                }
+                using (SolidBrush acc = new SolidBrush(accentColor))
+                {
+                    e.Graphics.FillRectangle(acc, 0, 0, 4, c.Height);
+                }
+            };
 
-            Label lblHeader = new Label
+            lblTitle = new Label
             {
                 Text = title,
                 Font = new Font("Segoe UI Semibold", 8.5F, FontStyle.Bold),
@@ -2465,13 +3135,13 @@ namespace ContasAPagar
                 Location = new Point(14, 10),
                 AutoSize = true
             };
-            p.Controls.Add(lblHeader);
+            p.Controls.Add(lblTitle);
 
             lblVal = new Label
             {
                 Text = "R$ 0,00",
                 Font = new Font("Segoe UI", 16F, FontStyle.Bold),
-                ForeColor = valueColor,
+                ForeColor = textColor,
                 Location = new Point(12, 29),
                 AutoSize = true
             };
@@ -2488,15 +3158,6 @@ namespace ContasAPagar
             p.Controls.Add(lblSub);
 
             return p;
-        }
-
-        private static void PaintCardBorder(object sender, PaintEventArgs e)
-        {
-            Control c = (Control)sender;
-            using (Pen pen = new Pen(Color.FromArgb(226, 232, 240), 1))
-            {
-                e.Graphics.DrawRectangle(pen, 0, 0, c.Width - 1, c.Height - 1);
-            }
         }
     }
 

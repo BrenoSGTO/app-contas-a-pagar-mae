@@ -17,21 +17,43 @@ Add-Type -AssemblyName System.Drawing
 $bmp = New-Object System.Drawing.Bitmap(64, 64)
 $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-$brush = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
+
+# Deep Slate background
+$bgBrush = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
     (New-Object System.Drawing.Rectangle(0, 0, 64, 64)),
-    [System.Drawing.Color]::FromArgb(147, 51, 234),
-    [System.Drawing.Color]::FromArgb(107, 33, 168),
+    [System.Drawing.Color]::FromArgb(15, 23, 42),
+    [System.Drawing.Color]::FromArgb(30, 41, 59),
     45.0
 )
-$g.FillRectangle($brush, 4, 4, 56, 56)
-$pen = New-Object System.Drawing.Pen([System.Drawing.Color]::White, 6)
+$g.FillRectangle($bgBrush, 4, 4, 56, 56)
+
+# Emerald top bar
+$accentBrush = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
+    (New-Object System.Drawing.Rectangle(4, 4, 56, 16)),
+    [System.Drawing.Color]::FromArgb(16, 185, 129),
+    [System.Drawing.Color]::FromArgb(5, 150, 105),
+    0.0
+)
+$g.FillRectangle($accentBrush, 4, 4, 56, 14)
+
+# Grid subtle lines
+$gridBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(71, 85, 105))
+$g.FillRectangle($gridBrush, 12, 26, 18, 4)
+$g.FillRectangle($gridBrush, 12, 35, 14, 4)
+$g.FillRectangle($gridBrush, 12, 44, 12, 4)
+
+# Emerald check badge
+$badgeBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(16, 185, 129))
+$g.FillEllipse($badgeBrush, 28, 26, 26, 26)
+
+$pen = New-Object System.Drawing.Pen([System.Drawing.Color]::White, 4.2)
 $pen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
 $pen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
 $pen.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
 $pts = @(
-    (New-Object System.Drawing.PointF(16, 33)),
-    (New-Object System.Drawing.PointF(28, 45)),
-    (New-Object System.Drawing.PointF(49, 20))
+    (New-Object System.Drawing.PointF(34, 39)),
+    (New-Object System.Drawing.PointF(39, 44)),
+    (New-Object System.Drawing.PointF(48, 34))
 )
 $g.DrawLines($pen, $pts)
 $g.Dispose()
@@ -70,7 +92,7 @@ $instaladorExe = Join-Path $distDir "instalador.exe"
 $zipPath = Join-Path $distDir "Instalador-ContasAPagar.zip"
 
 Write-Host "Compiling ContasAPagar.exe with Windows Application Manifest..."
-& $csc /nologo /target:winexe /optimize+ /out:$appExe `
+& $csc /nologo /target:winexe /optimize+ /codepage:65001 /utf8output /out:$appExe `
     /win32icon:$icoPath `
     /win32manifest:$manifestPath `
     /r:System.dll `
