@@ -8,21 +8,21 @@ using System.IO.Compression;
 using System.Linq;
 using System.Net;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using Microsoft.Win32;
 
 [assembly: AssemblyTitle("Contas a Pagar - Planilha Inteligente")]
 [assembly: AssemblyDescription("Controle de Contas Recorrentes e Parceladas")]
 [assembly: AssemblyCompany("Contas da Mãe")]
 [assembly: AssemblyProduct("Contas a Pagar")]
 [assembly: AssemblyCopyright("Copyright © 2026")]
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
+[assembly: AssemblyVersion("1.0.1.0")]
+[assembly: AssemblyFileVersion("1.0.1.0")]
 
 namespace ContasAPagar
 {
@@ -110,7 +110,7 @@ namespace ContasAPagar
     // =========================================================================
     public static class StorageService
     {
-        public static readonly string AppVersion = "1.0.0";
+        public static readonly string AppVersion = "1.0.1";
         public static readonly string GitHubRepo = "BrenoSGTO/app-contas-a-pagar-mae";
 
         public static string GetDataFolder()
@@ -447,6 +447,14 @@ namespace ContasAPagar
                     File.Copy(currentExe, targetExe, true);
                 }
 
+                // Clear Mark-of-the-Web (Zone.Identifier) on the installed exe so Windows never prompts again
+                try
+                {
+                    DeleteFileW(targetExe + ":Zone.Identifier");
+                    DeleteFileW(currentExe + ":Zone.Identifier");
+                }
+                catch { }
+
                 // Save an .ico file in installDir for shortcut icon if needed
                 if (chkDesktopShortcut.Checked)
                 {
@@ -465,8 +473,6 @@ namespace ContasAPagar
                     string startMenuDir = Environment.GetFolderPath(Environment.SpecialFolder.Programs);
                     CreateShortcut(Path.Combine(startMenuDir, "Contas a Pagar.lnk"), targetExe, installDir, "Controle de Contas Recorrentes");
                 }
-
-                RegisterUninstaller(installDir, targetExe);
 
                 progressBar.Value = 100;
                 lblStatus.Text = "Instalação concluída com sucesso!";
@@ -498,47 +504,56 @@ namespace ContasAPagar
             }
         }
 
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern bool DeleteFileW(string lpFileName);
+
+        [ComImport]
+        [Guid("00021401-0000-0000-C000-000000000046")]
+        private class ShellLink
+        {
+        }
+
+        [ComImport]
+        [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        [Guid("000214F9-0000-0000-C000-000000000046")]
+        private interface IShellLinkW
+        {
+            void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszFile, int cchMaxPath, IntPtr pfd, int fFlags);
+            void GetIDList(out IntPtr ppidl);
+            void SetIDList(IntPtr pidl);
+            void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszName, int cchMaxName);
+            void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+            void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszDir, int cchMaxPath);
+            void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string pszDir);
+            void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszArgs, int cchMaxPath);
+            void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string pszArgs);
+            void GetHotkey(out short pwHotkey);
+            void SetHotkey(short wHotkey);
+            void GetShowCmd(out int piShowCmd);
+            void SetShowCmd(int iShowCmd);
+            void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszIconPath, int cchIconPath, out int piIcon);
+            void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string pszIconPath, int iIcon);
+            void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string pszPathRel, int dwReserved);
+            void Resolve(IntPtr hwnd, int fFlags);
+            void SetPath([MarshalAs(UnmanagedType.LPWStr)] string pszFile);
+        }
+
         public static void CreateShortcut(string shortcutPath, string targetExe, string workingDir, string description)
         {
             try
             {
-                Type shellType = Type.GetTypeFromProgID("WScript.Shell");
-                if (shellType == null) return;
-                dynamic shell = Activator.CreateInstance(shellType);
-                dynamic shortcut = shell.CreateShortcut(shortcutPath);
-                shortcut.TargetPath = targetExe;
-                shortcut.WorkingDirectory = workingDir;
-                shortcut.Description = description;
-                shortcut.IconLocation = targetExe + ",0";
-                shortcut.Save();
+                IShellLinkW link = (IShellLinkW)new ShellLink();
+                link.SetPath(targetExe);
+                link.SetWorkingDirectory(workingDir);
+                link.SetDescription(description);
+                link.SetIconLocation(targetExe, 0);
+                System.Runtime.InteropServices.ComTypes.IPersistFile file = (System.Runtime.InteropServices.ComTypes.IPersistFile)link;
+                file.Save(shortcutPath, false);
             }
             catch
             {
                 // Ignore shortcut error if restricted environment
             }
-        }
-
-        private static void RegisterUninstaller(string installDir, string targetExe)
-        {
-            try
-            {
-                string keyPath = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\ContasAPagarMae";
-                using (RegistryKey key = Registry.CurrentUser.CreateSubKey(keyPath))
-                {
-                    if (key != null)
-                    {
-                        key.SetValue("DisplayName", "Contas a Pagar - Planilha Inteligente");
-                        key.SetValue("DisplayVersion", StorageService.AppVersion);
-                        key.SetValue("Publisher", "Contas da Mãe");
-                        key.SetValue("DisplayIcon", targetExe);
-                        key.SetValue("InstallLocation", installDir);
-                        key.SetValue("UninstallString", "\"" + targetExe + "\" --uninstall");
-                        key.SetValue("NoModify", 1, RegistryValueKind.DWord);
-                        key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
-                    }
-                }
-            }
-            catch { }
         }
     }
 
@@ -654,7 +669,7 @@ namespace ContasAPagar
                 foreach (Match m in matches)
                 {
                     string url = m.Groups[1].Value;
-                    if (url.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                    if (url.EndsWith("ContasAPagar.exe", StringComparison.OrdinalIgnoreCase))
                     {
                         bestUrl = url;
                         bestName = Path.GetFileName(new Uri(url).LocalPath);
@@ -721,10 +736,13 @@ namespace ContasAPagar
 
             try
             {
-                string tempDir = Path.Combine(Path.GetTempPath(), "ContasAPagarUpdate_" + Guid.NewGuid().ToString("N").Substring(0, 8));
-                Directory.CreateDirectory(tempDir);
+                string currentExe = Application.ExecutablePath;
+                string appDir = Path.GetDirectoryName(currentExe) ?? StorageService.GetDataFolder();
+                string workDir = Path.Combine(StorageService.GetDataFolder(), "UpdateStaging");
+                if (Directory.Exists(workDir)) Directory.Delete(workDir, true);
+                Directory.CreateDirectory(workDir);
 
-                string downloadedFile = Path.Combine(tempDir, release.AssetName ?? "update_pkg.zip");
+                string downloadedFile = Path.Combine(workDir, release.AssetName ?? "update_pkg.exe");
 
                 await Task.Run(() =>
                 {
@@ -738,7 +756,7 @@ namespace ContasAPagar
                 string newExePath = downloadedFile;
                 if (downloadedFile.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
                 {
-                    string extractDir = Path.Combine(tempDir, "extracted");
+                    string extractDir = Path.Combine(workDir, "extracted");
                     ZipFile.ExtractToDirectory(downloadedFile, extractDir);
                     string[] exes = Directory.GetFiles(extractDir, "*.exe", SearchOption.AllDirectories);
                     if (exes.Length == 0)
@@ -746,18 +764,17 @@ namespace ContasAPagar
                     newExePath = exes[0];
                 }
 
-                string currentExe = Application.ExecutablePath;
-                string batchPath = Path.Combine(tempDir, "apply_update.bat");
-                string batchContent = string.Format(
-                    "@echo off\r\n" +
-                    "timeout /t 2 /nobreak >nul\r\n" +
-                    "copy /Y \"{0}\" \"{1}\" >nul\r\n" +
-                    "start \"\" \"{1}\"\r\n" +
-                    "del \"%~f0\"\r\n",
-                    newExePath,
-                    currentExe);
+                // Native Windows in-place rename (Windows allows renaming a running .exe and placing the new one in its place without any .bat script!)
+                string backupExe = currentExe + ".old";
+                if (File.Exists(backupExe))
+                {
+                    try { File.Delete(backupExe); } catch { }
+                }
 
-                File.WriteAllText(batchPath, batchContent, Encoding.Default);
+                File.Move(currentExe, backupExe);
+                File.Copy(newExePath, currentExe, true);
+                try { InstallerForm.DeleteFileW(currentExe + ":Zone.Identifier"); } catch { }
+
                 progressModal.Close();
 
                 MessageBox.Show(
@@ -769,9 +786,8 @@ namespace ContasAPagar
 
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
                 {
-                    FileName = batchPath,
-                    WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden,
-                    CreateNoWindow = true,
+                    FileName = currentExe,
+                    WorkingDirectory = appDir,
                     UseShellExecute = true
                 });
 
@@ -2495,6 +2511,14 @@ namespace ContasAPagar
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
+            try
+            {
+                string oldFile = Application.ExecutablePath + ".old";
+                if (File.Exists(oldFile)) File.Delete(oldFile);
+                InstallerForm.DeleteFileW(Application.ExecutablePath + ":Zone.Identifier");
+            }
+            catch { }
+
             string exeName = Path.GetFileName(Application.ExecutablePath) ?? "";
             bool hasInstallFlag = args != null && args.Any(a =>
                 string.Equals(a, "--install", StringComparison.OrdinalIgnoreCase) ||
@@ -2605,8 +2629,6 @@ namespace ContasAPagar
 
                     string startLnk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Contas a Pagar.lnk");
                     if (File.Exists(startLnk)) File.Delete(startLnk);
-
-                    Registry.CurrentUser.DeleteSubKeyTree(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\ContasAPagarMae", false);
                 }
                 catch { }
 

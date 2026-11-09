@@ -4,12 +4,15 @@ $rootDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $distDir = Join-Path $rootDir "dist"
 $assetsDir = Join-Path $rootDir "assets"
 $icoPath = Join-Path $assetsDir "app.ico"
+$manifestPath = Join-Path $rootDir "src\app.manifest"
+$certFile = Join-Path $distDir "Certificado-Seguranca.cer"
+$liberarCmd = Join-Path $distDir "1-Liberar-Instalador.cmd"
 
 if (-not (Test-Path $distDir)) {
     New-Item -ItemType Directory -Path $distDir | Out-Null
 }
 
-# Generate a proper Windows .ico file using .NET System.Drawing
+# 1. Generate a proper Windows .ico file using .NET System.Drawing
 Add-Type -AssemblyName System.Drawing
 $bmp = New-Object System.Drawing.Bitmap(64, 64)
 $g = [System.Drawing.Graphics]::FromImage($bmp)
@@ -33,7 +36,6 @@ $pts = @(
 $g.DrawLines($pen, $pts)
 $g.Dispose()
 
-# Write PNG-encoded ICO file
 $msPng = New-Object System.IO.MemoryStream
 $bmp.Save($msPng, [System.Drawing.Imaging.ImageFormat]::Png)
 $pngBytes = $msPng.ToArray()
@@ -42,19 +44,17 @@ $bmp.Dispose()
 
 $fsIco = [System.IO.File]::Create($icoPath)
 $bw = New-Object System.IO.BinaryWriter($fsIco)
-# ICONDIR header
-$bw.Write([UInt16]0) # Reserved
-$bw.Write([UInt16]1) # Type: 1 = ICO
-$bw.Write([UInt16]1) # Count: 1 image
-# ICONDIRENTRY
-$bw.Write([Byte]64)  # Width
-$bw.Write([Byte]64)  # Height
-$bw.Write([Byte]0)   # ColorCount
-$bw.Write([Byte]0)   # Reserved
-$bw.Write([UInt16]1) # Planes
-$bw.Write([UInt16]32)# BitCount
-$bw.Write([UInt32]$pngBytes.Length) # BytesInRes
-$bw.Write([UInt32]22) # ImageOffset (6 + 16)
+$bw.Write([UInt16]0)
+$bw.Write([UInt16]1)
+$bw.Write([UInt16]1)
+$bw.Write([Byte]64)
+$bw.Write([Byte]64)
+$bw.Write([Byte]0)
+$bw.Write([Byte]0)
+$bw.Write([UInt16]1)
+$bw.Write([UInt16]32)
+$bw.Write([UInt32]$pngBytes.Length)
+$bw.Write([UInt32]22)
 $bw.Write($pngBytes)
 $bw.Flush()
 $bw.Close()
@@ -62,15 +62,17 @@ $fsIco.Dispose()
 
 Write-Host "Icon generated at $icoPath"
 
+# 2. Compile with embedded UAC/OS manifest (/win32manifest) and deterministic PE header
 $csc = "$env:windir\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 $srcFile = Join-Path $rootDir "src\ContasAPagar.cs"
 $appExe = Join-Path $distDir "ContasAPagar.exe"
 $instaladorExe = Join-Path $distDir "instalador.exe"
 $zipPath = Join-Path $distDir "Instalador-ContasAPagar.zip"
 
-Write-Host "Compiling ContasAPagar.exe..."
+Write-Host "Compiling ContasAPagar.exe with Windows Application Manifest..."
 & $csc /nologo /target:winexe /optimize+ /out:$appExe `
     /win32icon:$icoPath `
+    /win32manifest:$manifestPath `
     /r:System.dll `
     /r:System.Core.dll `
     /r:System.Drawing.dll `
@@ -86,8 +88,37 @@ if ($LASTEXITCODE -ne 0) {
     throw "Compilation failed with exit code $LASTEXITCODE"
 }
 
+# 3. Sign executables with Authenticode Certificate (CodeSigning)
+$certSubject = "CN=Contas a Pagar - Planilha Inteligente"
+$cert = Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert | Where-Object { $_.Subject -eq $certSubject } | Select-Object -First 1
+if (-not $cert) {
+    Write-Host "Creating Authenticode Code Signing Certificate..."
+    $cert = New-SelfSignedCertificate `
+        -Type CodeSigningCert `
+        -Subject $certSubject `
+        -CertStoreLocation "Cert:\CurrentUser\My" `
+        -NotAfter (Get-Date).AddYears(10)
+}
+
+Export-Certificate -Cert $cert -FilePath $certFile -Force | Out-Null
+
+Write-Host "Signing ContasAPagar.exe with Authenticode SHA256..."
+Set-AuthenticodeSignature -FilePath $appExe -Certificate $cert -HashAlgorithm SHA256 | Out-Null
+
 Copy-Item $appExe $instaladorExe -Force
 
+# 4. Create helper script to unblock Mark-of-the-Web (Zone.Identifier), trust certificate in CurrentUser, and launch instalador.exe
+$cmdLines = @(
+    "@echo off",
+    "chcp 65001 >nul",
+    "title Instalador - Contas a Pagar",
+    "echo Preparando instalador seguro...",
+    "powershell -NoProfile -ExecutionPolicy Bypass -Command ""Get-ChildItem -Path '%~dp0' -Recurse | Unblock-File -ErrorAction SilentlyContinue; if (Test-Path '%~dp0Certificado-Seguranca.cer') { Import-Certificate -FilePath '%~dp0Certificado-Seguranca.cer' -CertStoreLocation 'Cert:\CurrentUser\Root' -ErrorAction SilentlyContinue | Out-Null; Import-Certificate -FilePath '%~dp0Certificado-Seguranca.cer' -CertStoreLocation 'Cert:\CurrentUser\TrustedPublisher' -ErrorAction SilentlyContinue | Out-Null }""",
+    "start """" ""%~dp0instalador.exe"" --install"
+)
+[System.IO.File]::WriteAllLines($liberarCmd, $cmdLines, [System.Text.Encoding]::ASCII)
+
+# 5. Package Instalador-ContasAPagar.zip
 if (Test-Path $zipPath) {
     Remove-Item $zipPath -Force
 }
@@ -98,12 +129,17 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 $zipStream = [System.IO.File]::Create($zipPath)
 $archive = New-Object System.IO.Compression.ZipArchive($zipStream, [System.IO.Compression.ZipArchiveMode]::Create)
-$entry = $archive.CreateEntry("instalador.exe", [System.IO.Compression.CompressionLevel]::Optimal)
-$entryStream = $entry.Open()
-$inStream = [System.IO.File]::Open($instaladorExe, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
-$inStream.CopyTo($entryStream)
-$inStream.Close()
-$entryStream.Close()
+
+foreach ($fileToZip in @($instaladorExe, $liberarCmd, $certFile)) {
+    $entryName = [System.IO.Path]::GetFileName($fileToZip)
+    $entry = $archive.CreateEntry($entryName, [System.IO.Compression.CompressionLevel]::Optimal)
+    $entryStream = $entry.Open()
+    $inStream = [System.IO.File]::Open($fileToZip, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+    $inStream.CopyTo($entryStream)
+    $inStream.Close()
+    $entryStream.Close()
+}
+
 $archive.Dispose()
 $zipStream.Close()
 
