@@ -489,7 +489,67 @@ namespace ContasAPagar
 
                 if (!string.Equals(Path.GetFullPath(currentExe), Path.GetFullPath(targetExe), StringComparison.OrdinalIgnoreCase))
                 {
-                    File.Copy(currentExe, targetExe, true);
+                    // Fechar qualquer instância de ContasAPagar em execução para não travar o arquivo
+                    try
+                    {
+                        int currentPid = System.Diagnostics.Process.GetCurrentProcess().Id;
+                        foreach (var p in System.Diagnostics.Process.GetProcessesByName("ContasAPagar"))
+                        {
+                            if (p.Id != currentPid)
+                            {
+                                try
+                                {
+                                    p.CloseMainWindow();
+                                    if (!p.WaitForExit(1500))
+                                    {
+                                        p.Kill();
+                                        p.WaitForExit(1000);
+                                    }
+                                }
+                                catch { }
+                            }
+                        }
+                    }
+                    catch { }
+
+                    // Remover atributo ReadOnly caso exista
+                    if (File.Exists(targetExe))
+                    {
+                        try { File.SetAttributes(targetExe, FileAttributes.Normal); } catch { }
+                    }
+
+                    // Cópia resiliente com fallback de renomeação caso o Windows mantenha o arquivo em uso
+                    bool copied = false;
+                    for (int attempt = 0; attempt < 3 && !copied; attempt++)
+                    {
+                        try
+                        {
+                            File.Copy(currentExe, targetExe, true);
+                            copied = true;
+                        }
+                        catch (Exception)
+                        {
+                            if (attempt < 2)
+                            {
+                                try
+                                {
+                                    string tempOld = targetExe + ".old." + Guid.NewGuid().ToString("N");
+                                    File.Move(targetExe, tempOld);
+                                    File.Copy(currentExe, targetExe, true);
+                                    copied = true;
+                                    try { File.Delete(tempOld); } catch { }
+                                }
+                                catch
+                                {
+                                    System.Threading.Thread.Sleep(500);
+                                }
+                            }
+                            else
+                            {
+                                throw;
+                            }
+                        }
+                    }
                 }
 
                 // Clear Mark-of-the-Web (Zone.Identifier) on the installed exe so Windows never prompts again
