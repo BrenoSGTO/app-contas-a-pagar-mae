@@ -752,50 +752,90 @@ namespace ContasAPagar
 
         private static ReleaseInfo FetchLatestRelease()
         {
-            string apiUrl = "https://api.github.com/repos/" + StorageService.GitHubRepo + "/releases/latest";
-            HttpWebRequest req = (HttpWebRequest)WebRequest.Create(apiUrl);
+            try
+            {
+                string apiUrl = "https://api.github.com/repos/" + StorageService.GitHubRepo + "/releases/latest";
+                HttpWebRequest req = (HttpWebRequest)WebRequest.Create(apiUrl);
+                req.UserAgent = "ContasAPagarMae-AutoUpdater/" + StorageService.AppVersion;
+                req.Accept = "application/vnd.github.v3+json";
+                req.Timeout = 10000;
+
+                using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse())
+                using (StreamReader reader = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
+                {
+                    string json = reader.ReadToEnd();
+                    string tag = ExtractJsonValue(json, "tag_name");
+                    string body = ExtractJsonValue(json, "body");
+                    string htmlUrl = ExtractJsonValue(json, "html_url");
+
+                    // Find browser_download_url for .exe or .zip
+                    var matches = Regex.Matches(json, "\"browser_download_url\"\\s*:\\s*\"([^\"]+)\"");
+                    string bestUrl = null;
+                    string bestName = null;
+
+                    foreach (Match m in matches)
+                    {
+                        string url = m.Groups[1].Value;
+                        if (url.EndsWith("ContasAPagar.exe", StringComparison.OrdinalIgnoreCase))
+                        {
+                            bestUrl = url;
+                            bestName = Path.GetFileName(new Uri(url).LocalPath);
+                            break;
+                        }
+                        if (url.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) && bestUrl == null)
+                        {
+                            bestUrl = url;
+                            bestName = Path.GetFileName(new Uri(url).LocalPath);
+                        }
+                    }
+
+                    string cleanVer = (tag ?? "").Trim().TrimStart('v', 'V');
+                    return new ReleaseInfo
+                    {
+                        TagName = tag,
+                        VersionString = cleanVer,
+                        DownloadUrl = bestUrl,
+                        AssetName = bestName,
+                        ReleaseNotes = UnescapeJson(body),
+                        HtmlUrl = htmlUrl
+                    };
+                }
+            }
+            catch
+            {
+                // Fallback direto via redirecionamento de release do GitHub (não consome cota de API e evita rate limit)
+                return FetchLatestReleaseWebFallback();
+            }
+        }
+
+        private static ReleaseInfo FetchLatestReleaseWebFallback()
+        {
+            string latestUrl = "https://github.com/" + StorageService.GitHubRepo + "/releases/latest";
+            HttpWebRequest req = (HttpWebRequest)WebRequest.Create(latestUrl);
             req.UserAgent = "ContasAPagarMae-AutoUpdater/" + StorageService.AppVersion;
-            req.Accept = "application/vnd.github.v3+json";
+            req.AllowAutoRedirect = false;
             req.Timeout = 10000;
 
             using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse())
-            using (StreamReader reader = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
             {
-                string json = reader.ReadToEnd();
-                string tag = ExtractJsonValue(json, "tag_name");
-                string body = ExtractJsonValue(json, "body");
-                string htmlUrl = ExtractJsonValue(json, "html_url");
-
-                // Find browser_download_url for .exe or .zip
-                var matches = Regex.Matches(json, "\"browser_download_url\"\\s*:\\s*\"([^\"]+)\"");
-                string bestUrl = null;
-                string bestName = null;
-
-                foreach (Match m in matches)
+                string location = resp.Headers["Location"];
+                if (string.IsNullOrEmpty(location))
                 {
-                    string url = m.Groups[1].Value;
-                    if (url.EndsWith("ContasAPagar.exe", StringComparison.OrdinalIgnoreCase))
-                    {
-                        bestUrl = url;
-                        bestName = Path.GetFileName(new Uri(url).LocalPath);
-                        break;
-                    }
-                    if (url.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) && bestUrl == null)
-                    {
-                        bestUrl = url;
-                        bestName = Path.GetFileName(new Uri(url).LocalPath);
-                    }
+                    throw new Exception("Não foi possível obter a versão mais recente via GitHub.");
                 }
 
-                string cleanVer = (tag ?? "").Trim().TrimStart('v', 'V');
+                string tag = location.Substring(location.LastIndexOf('/') + 1);
+                string cleanVer = tag.Trim().TrimStart('v', 'V');
+                string downloadUrl = "https://github.com/" + StorageService.GitHubRepo + "/releases/latest/download/ContasAPagar.exe";
+
                 return new ReleaseInfo
                 {
                     TagName = tag,
                     VersionString = cleanVer,
-                    DownloadUrl = bestUrl,
-                    AssetName = bestName,
-                    ReleaseNotes = UnescapeJson(body),
-                    HtmlUrl = htmlUrl
+                    DownloadUrl = downloadUrl,
+                    AssetName = "ContasAPagar.exe",
+                    ReleaseNotes = "Atualização automática obtida via GitHub Releases.",
+                    HtmlUrl = location
                 };
             }
         }
