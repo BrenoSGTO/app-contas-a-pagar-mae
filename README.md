@@ -48,6 +48,28 @@ Cadastrar uma conta nova leva menos de 10 segundos:
 - **Contas Fixas Contínuas**: Marque essa opção para contas mensais que se repetem indefinidamente sem data de término (ex: Aluguel, Luz, Água, Internet, Condomínio, Plano de Saúde).
 - **Contas Parceladas (Recorrências)**: Defina a quantidade de parcelas (ex: 6x, 10x, 12x, 24x) e o mês de início (ex: Novembro/2026). O sistema calcula sozinho a data da primeira e da última parcela.
 - **Categorias e Observações**: Organize por categoria (*Casa*, *Luz/Água*, *Internet*, *Cartão de Crédito*, *Saúde*, etc.) e adicione notas de PIX ou código de barras.
+- **Valor Fixo ou Variável**: No cadastro, escolha entre **"Mesmo valor todo mês"** (aluguel, internet, plano de saúde) ou **"Valor muda todo mês"** (luz, água, gás). Nas contas variáveis:
+  - O valor informado no cadastro é só uma **estimativa** (aparece como `~ 180,00` em laranja até o valor real ser informado).
+  - Ao marcar a conta como paga, o programa **pergunta quanto veio a conta naquele mês**.
+  - Também dá para informar o valor antes: **duplo clique no valor** em *Detalhes do Mês*, ou **botão direito no mês** na *Visão Anual*.
+  - O valor de um mês nunca altera os meses que já foram informados.
+
+---
+
+### 4. 👥 Planilhas Separadas por Pessoa
+Para quem paga contas de outras pessoas (avó, sogra, filhos...):
+
+- **Barra "Planilha de:"** logo abaixo do topo: clique no nome da pessoa para ver só as contas dela. A principal é **Minha Casa**.
+- **Todas as Pessoas**: mostra todas as contas juntas, com o nome da pessoa ao lado de cada conta.
+- **+ Pessoa / Editar**: adiciona, renomeia ou exclui pessoas. Ao excluir uma pessoa com contas, dá para **mover as contas para Minha Casa** ou apagá-las.
+- No cadastro de cada conta, o campo **"Conta de quem?"** define a pessoa.
+
+### 5. 📊 Resumo Geral (Por Pessoa e Categoria)
+A terceira aba mostra, para o ano escolhido, **quanto se gasta com cada pessoa e em cada tipo de conta**:
+
+- Total no mês, total no ano, média por mês, já pago e quanto falta pagar.
+- Barra de **% do total**: quanto cada pessoa representa no gasto geral, e quanto cada categoria representa no gasto daquela pessoa.
+- Duplo clique numa pessoa abre a planilha dela.
 
 ---
 

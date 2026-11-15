@@ -21,8 +21,8 @@ using System.Windows.Forms;
 [assembly: AssemblyCompany("Contas da Mãe")]
 [assembly: AssemblyProduct("Contas a Pagar")]
 [assembly: AssemblyCopyright("Copyright © 2026")]
-[assembly: AssemblyVersion("1.2.0.0")]
-[assembly: AssemblyFileVersion("1.2.0.0")]
+[assembly: AssemblyVersion("1.3.0.0")]
+[assembly: AssemblyFileVersion("1.3.0.0")]
 
 namespace ContasAPagar
 {
@@ -42,6 +42,8 @@ namespace ContasAPagar
         [DataMember] public int RecurrenceCount { get; set; } // 0 = Fixa/Contínua (todo mês), >0 = Quantidade de meses/parcelas
         [DataMember] public string Notes { get; set; }
         [DataMember] public bool Active { get; set; }
+        [DataMember] public bool IsVariableAmount { get; set; } // true = valor muda todo mês (luz, água...)
+        [DataMember] public string PersonId { get; set; } // pessoa para quem a conta é paga
 
         public BillDefinition()
         {
@@ -53,6 +55,8 @@ namespace ContasAPagar
             RecurrenceCount = 12;
             Notes = "";
             Active = true;
+            IsVariableAmount = false;
+            PersonId = Person.MainPersonId;
         }
 
         public int StartMonthIndex
@@ -93,15 +97,88 @@ namespace ContasAPagar
     }
 
     [DataContract]
+    public class Person
+    {
+        public const string MainPersonId = "principal";
+        public const string MainPersonDefaultName = "Minha Casa";
+
+        [DataMember] public string Id { get; set; }
+        [DataMember] public string Name { get; set; }
+
+        public Person()
+        {
+            Id = Guid.NewGuid().ToString("N");
+            Name = "";
+        }
+
+        public bool IsMain
+        {
+            get { return Id == MainPersonId; }
+        }
+    }
+
+    [DataContract]
     public class AppDatabase
     {
         [DataMember] public List<BillDefinition> Bills { get; set; }
         [DataMember] public List<MonthlyPaymentRecord> Payments { get; set; }
+        [DataMember] public List<Person> People { get; set; }
 
         public AppDatabase()
         {
             Bills = new List<BillDefinition>();
             Payments = new List<MonthlyPaymentRecord>();
+            People = new List<Person>();
+            EnsureIntegrity();
+        }
+
+        /// <summary>
+        /// Garante dados consistentes (inclusive para bancos salvos por versões antigas,
+        /// que não tinham pessoas): sempre existe a pessoa principal e toda conta tem dono.
+        /// </summary>
+        public void EnsureIntegrity()
+        {
+            if (Bills == null) Bills = new List<BillDefinition>();
+            if (Payments == null) Payments = new List<MonthlyPaymentRecord>();
+            if (People == null) People = new List<Person>();
+
+            People.RemoveAll(p => p == null || string.IsNullOrEmpty(p.Id));
+            if (!People.Any(p => p.IsMain))
+            {
+                People.Insert(0, new Person { Id = Person.MainPersonId, Name = Person.MainPersonDefaultName });
+            }
+            foreach (var p in People)
+            {
+                if (string.IsNullOrWhiteSpace(p.Name))
+                    p.Name = p.IsMain ? Person.MainPersonDefaultName : "Sem nome";
+            }
+
+            foreach (var b in Bills)
+            {
+                if (string.IsNullOrEmpty(b.PersonId) || !People.Any(p => p.Id == b.PersonId))
+                    b.PersonId = Person.MainPersonId;
+            }
+        }
+
+        public Person GetPerson(string personId)
+        {
+            return People.FirstOrDefault(p => p.Id == personId)
+                ?? People.FirstOrDefault(p => p.IsMain);
+        }
+
+        public string GetPersonName(string personId)
+        {
+            var p = GetPerson(personId);
+            return p != null ? p.Name : Person.MainPersonDefaultName;
+        }
+
+        /// <summary>Pessoa principal primeiro, depois as demais em ordem alfabética.</summary>
+        public List<Person> OrderedPeople()
+        {
+            return People
+                .OrderBy(p => p.IsMain ? 0 : 1)
+                .ThenBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
         }
     }
 
@@ -110,7 +187,7 @@ namespace ContasAPagar
     // =========================================================================
     public static class StorageService
     {
-        public static readonly string AppVersion = "1.2.0";
+        public static readonly string AppVersion = "1.3.0";
         public static readonly string GitHubRepo = "BrenoSGTO/app-contas-a-pagar-mae";
 
         public static string GetDataFolder()
@@ -151,8 +228,7 @@ namespace ContasAPagar
                     var ser = new DataContractJsonSerializer(typeof(AppDatabase));
                     var loaded = (AppDatabase)ser.ReadObject(ms);
                     if (loaded == null) return new AppDatabase();
-                    if (loaded.Bills == null) loaded.Bills = new List<BillDefinition>();
-                    if (loaded.Payments == null) loaded.Payments = new List<MonthlyPaymentRecord>();
+                    loaded.EnsureIntegrity();
                     return loaded;
                 }
             }
@@ -994,7 +1070,12 @@ namespace ContasAPagar
         public BillDefinition ResultBill { get; private set; }
 
         private TextBox txtName;
+        private ComboBox cmbPerson;
         private ComboBox cmbCategory;
+        private RadioButton rbSameAmount;
+        private RadioButton rbVariableAmount;
+        private Label lblAmount;
+        private Label lblAmountHint;
         private NumericUpDown numAmount;
         private NumericUpDown numDueDay;
         private ComboBox cmbStartMonth;
@@ -1004,6 +1085,7 @@ namespace ContasAPagar
         private NumericUpDown numRecurrenceCount;
         private TextBox txtNotes;
         private Label lblPreviewSchedule;
+        private List<Person> people;
 
         private static readonly string[] MonthNames = new[]
         {
@@ -1012,19 +1094,24 @@ namespace ContasAPagar
             "09 - Setembro", "10 - Outubro", "11 - Novembro", "12 - Dezembro"
         };
 
-        public BillDialog(BillDefinition existing, int defaultMonth, int defaultYear)
+        public BillDialog(BillDefinition existing, int defaultMonth, int defaultYear, List<Person> availablePeople, string defaultPersonId)
         {
             bool isEdit = existing != null;
+            people = (availablePeople != null && availablePeople.Count > 0)
+                ? availablePeople
+                : new List<Person> { new Person { Id = Person.MainPersonId, Name = Person.MainPersonDefaultName } };
+
             ResultBill = existing != null ? CloneBill(existing) : new BillDefinition
             {
                 StartMonth = defaultMonth,
                 StartYear = defaultYear,
                 RecurrenceCount = 12,
-                DueDay = 10
+                DueDay = 10,
+                PersonId = string.IsNullOrEmpty(defaultPersonId) ? Person.MainPersonId : defaultPersonId
             };
 
             Text = isEdit ? "Editar Conta Recorrente" : "Nova Conta Recorrente / Parcelada";
-            Size = new Size(560, 610);
+            Size = new Size(560, 712);
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
@@ -1084,15 +1171,28 @@ namespace ContasAPagar
             Controls.Add(txtName);
             y += 42;
 
-            // Categoria e Valor
-            Controls.Add(MakeLabel("Categoria", leftCol, y));
-            Controls.Add(MakeLabel("Valor Mensal (R$) *", rightCol, y));
+            // Pessoa e Categoria
+            Controls.Add(MakeLabel("Conta de quem? (Pessoa) *", leftCol, y));
+            Controls.Add(MakeLabel("Categoria", rightCol, y));
             y += 24;
 
-            cmbCategory = new ComboBox
+            cmbPerson = new ComboBox
             {
                 Location = new Point(leftCol, y),
                 Size = new Size(240, 30),
+                Font = new Font("Segoe UI Semibold", 10.5F, FontStyle.Bold),
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                DisplayMember = "Name"
+            };
+            foreach (var p in people) cmbPerson.Items.Add(p);
+            int personIdx = people.FindIndex(p => p.Id == ResultBill.PersonId);
+            cmbPerson.SelectedIndex = personIdx >= 0 ? personIdx : 0;
+            Controls.Add(cmbPerson);
+
+            cmbCategory = new ComboBox
+            {
+                Location = new Point(rightCol, y),
+                Size = new Size(228, 30),
                 Font = new Font("Segoe UI", 10.5F),
                 DropDownStyle = ComboBoxStyle.DropDown
             };
@@ -1103,20 +1203,74 @@ namespace ContasAPagar
             });
             cmbCategory.Text = string.IsNullOrWhiteSpace(ResultBill.Category) ? "Casa / Moradia" : ResultBill.Category;
             Controls.Add(cmbCategory);
+            y += 44;
+
+            // Valor: igual todo mês ou variável
+            GroupBox grpAmount = new GroupBox
+            {
+                Text = "Valor da Conta",
+                Location = new Point(leftCol, y),
+                Size = new Size(495, 100),
+                Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold),
+                ForeColor = Color.FromArgb(30, 41, 59)
+            };
+
+            rbSameAmount = new RadioButton
+            {
+                Text = "Mesmo valor todo mês",
+                Location = new Point(16, 28),
+                AutoSize = true,
+                Font = new Font("Segoe UI", 10F),
+                Checked = !ResultBill.IsVariableAmount
+            };
+            rbSameAmount.CheckedChanged += (s, e) => UpdateAmountMode();
+            grpAmount.Controls.Add(rbSameAmount);
+
+            rbVariableAmount = new RadioButton
+            {
+                Text = "Valor muda todo mês (luz, água...)",
+                Location = new Point(16, 58),
+                AutoSize = true,
+                Font = new Font("Segoe UI", 10F),
+                Checked = ResultBill.IsVariableAmount
+            };
+            rbVariableAmount.CheckedChanged += (s, e) => UpdateAmountMode();
+            grpAmount.Controls.Add(rbVariableAmount);
+
+            lblAmount = new Label
+            {
+                Text = "Valor Mensal (R$) *",
+                Location = new Point(266, 22),
+                AutoSize = true,
+                Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold),
+                ForeColor = Color.FromArgb(51, 65, 85)
+            };
+            grpAmount.Controls.Add(lblAmount);
 
             numAmount = new NumericUpDown
             {
-                Location = new Point(rightCol, y),
-                Size = new Size(228, 30),
+                Location = new Point(266, 44),
+                Size = new Size(212, 30),
                 Font = new Font("Segoe UI Semibold", 11F, FontStyle.Bold),
                 DecimalPlaces = 2,
                 Maximum = 9999999,
                 Minimum = 0,
-                Value = ResultBill.Amount,
+                Value = Math.Min(9999999m, Math.Max(0m, ResultBill.Amount)),
                 ThousandsSeparator = true
             };
-            Controls.Add(numAmount);
-            y += 44;
+            grpAmount.Controls.Add(numAmount);
+
+            lblAmountHint = new Label
+            {
+                Location = new Point(266, 76),
+                Size = new Size(222, 20),
+                Font = new Font("Segoe UI", 8.5F, FontStyle.Italic),
+                ForeColor = Color.FromArgb(100, 116, 139)
+            };
+            grpAmount.Controls.Add(lblAmountHint);
+
+            Controls.Add(grpAmount);
+            y += 112;
 
             // Dia do Vencimento & Mês/Ano do Primeiro Pagamento
             Controls.Add(MakeLabel("Dia do Vencimento (1 a 31) *", leftCol, y));
@@ -1201,7 +1355,7 @@ namespace ContasAPagar
                 Font = new Font("Segoe UI Semibold", 10.5F, FontStyle.Bold),
                 Minimum = 1,
                 Maximum = 240,
-                Value = ResultBill.RecurrenceCount > 0 ? ResultBill.RecurrenceCount : 12,
+                Value = ResultBill.RecurrenceCount > 0 ? Math.Min(240, ResultBill.RecurrenceCount) : 12,
                 Enabled = ResultBill.RecurrenceCount > 0
             };
             numRecurrenceCount.ValueChanged += (s, e) => UpdatePreview();
@@ -1284,7 +1438,24 @@ namespace ContasAPagar
             btnCancel.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
             Controls.Add(btnCancel);
 
+            CancelButton = btnCancel;
+
+            UpdateAmountMode();
             UpdatePreview();
+        }
+
+        private void UpdateAmountMode()
+        {
+            if (rbVariableAmount.Checked)
+            {
+                lblAmount.Text = "Valor Estimado (R$)";
+                lblAmountHint.Text = "Opcional. Você informa a cada mês.";
+            }
+            else
+            {
+                lblAmount.Text = "Valor Mensal (R$) *";
+                lblAmountHint.Text = "Repete este valor em todos os meses.";
+            }
         }
 
         private void UpdatePreview()
@@ -1322,8 +1493,24 @@ namespace ContasAPagar
                 return;
             }
 
+            if (rbSameAmount.Checked && numAmount.Value <= 0)
+            {
+                var res = MessageBox.Show(this,
+                    "O valor da conta está R$ 0,00.\n\nSe o valor muda todo mês (ex: luz, água), escolha a opção \"Valor muda todo mês\".\n\nDeseja salvar mesmo assim?",
+                    "Atenção", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                if (res != DialogResult.Yes)
+                {
+                    numAmount.Focus();
+                    return;
+                }
+            }
+
+            Person selectedPerson = cmbPerson.SelectedItem as Person;
+
             ResultBill.Name = txtName.Text.Trim();
+            ResultBill.PersonId = selectedPerson != null ? selectedPerson.Id : Person.MainPersonId;
             ResultBill.Category = string.IsNullOrWhiteSpace(cmbCategory.Text) ? "Geral" : cmbCategory.Text.Trim();
+            ResultBill.IsVariableAmount = rbVariableAmount.Checked;
             ResultBill.Amount = numAmount.Value;
             ResultBill.DueDay = (int)numDueDay.Value;
             ResultBill.StartMonth = cmbStartMonth.SelectedIndex + 1;
@@ -1361,14 +1548,344 @@ namespace ContasAPagar
                 StartYear = b.StartYear,
                 RecurrenceCount = b.RecurrenceCount,
                 Notes = b.Notes,
-                Active = b.Active
+                Active = b.Active,
+                IsVariableAmount = b.IsVariableAmount,
+                PersonId = b.PersonId
             };
         }
     }
 
     // =========================================================================
-    // MAIN SPREADSHEET FORM
+    // DIALOGOS SIMPLES: PERGUNTAR TEXTO / VALOR
     // =========================================================================
+    public static class PromptDialog
+    {
+        private static Form CreateBaseForm(string title, string message, out int contentY)
+        {
+            Form f = new Form
+            {
+                Text = title,
+                Size = new Size(440, 230),
+                StartPosition = FormStartPosition.CenterParent,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox = false,
+                MinimizeBox = false,
+                ShowInTaskbar = false,
+                BackColor = Color.White,
+                Font = new Font("Segoe UI", 10F),
+                Icon = AppIconBuilder.CreateAppIcon()
+            };
+
+            Label lbl = new Label
+            {
+                Text = message,
+                Location = new Point(20, 18),
+                Size = new Size(390, 48),
+                Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold),
+                ForeColor = Color.FromArgb(30, 41, 59)
+            };
+            f.Controls.Add(lbl);
+            contentY = 72;
+
+            Button btnOk = new Button
+            {
+                Text = "✔  Confirmar",
+                Location = new Point(158, 130),
+                Size = new Size(130, 38),
+                BackColor = Color.FromArgb(16, 185, 129),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold),
+                DialogResult = DialogResult.OK,
+                Cursor = Cursors.Hand
+            };
+            btnOk.FlatAppearance.BorderSize = 0;
+            f.Controls.Add(btnOk);
+
+            Button btnCancel = new Button
+            {
+                Text = "Cancelar",
+                Location = new Point(296, 130),
+                Size = new Size(110, 38),
+                BackColor = Color.FromArgb(226, 232, 240),
+                ForeColor = Color.FromArgb(51, 65, 85),
+                FlatStyle = FlatStyle.Flat,
+                DialogResult = DialogResult.Cancel,
+                Cursor = Cursors.Hand
+            };
+            btnCancel.FlatAppearance.BorderSize = 0;
+            f.Controls.Add(btnCancel);
+
+            f.AcceptButton = btnOk;
+            f.CancelButton = btnCancel;
+            return f;
+        }
+
+        /// <summary>Pergunta um texto. Retorna null se cancelado ou vazio.</summary>
+        public static string AskText(IWin32Window owner, string title, string message, string initialValue)
+        {
+            int y;
+            using (Form f = CreateBaseForm(title, message, out y))
+            {
+                TextBox txt = new TextBox
+                {
+                    Location = new Point(20, y),
+                    Size = new Size(386, 30),
+                    Font = new Font("Segoe UI", 11F),
+                    Text = initialValue ?? "",
+                    MaxLength = 40
+                };
+                f.Controls.Add(txt);
+                f.Shown += (s, e) => { txt.Focus(); txt.SelectAll(); };
+
+                if (f.ShowDialog(owner) != DialogResult.OK) return null;
+                string val = (txt.Text ?? "").Trim();
+                return val.Length == 0 ? null : val;
+            }
+        }
+
+        /// <summary>Pergunta um valor em R$. Retorna null se cancelado.</summary>
+        public static decimal? AskAmount(IWin32Window owner, string title, string message, decimal initialValue)
+        {
+            int y;
+            using (Form f = CreateBaseForm(title, message, out y))
+            {
+                Label lblRs = new Label
+                {
+                    Text = "R$",
+                    Location = new Point(20, y + 4),
+                    AutoSize = true,
+                    Font = new Font("Segoe UI Semibold", 11F, FontStyle.Bold),
+                    ForeColor = Color.FromArgb(51, 65, 85)
+                };
+                f.Controls.Add(lblRs);
+
+                NumericUpDown num = new NumericUpDown
+                {
+                    Location = new Point(54, y),
+                    Size = new Size(180, 30),
+                    Font = new Font("Segoe UI Semibold", 12F, FontStyle.Bold),
+                    DecimalPlaces = 2,
+                    Maximum = 9999999,
+                    Minimum = 0,
+                    ThousandsSeparator = true,
+                    Value = Math.Min(9999999m, Math.Max(0m, initialValue))
+                };
+                f.Controls.Add(num);
+                f.Shown += (s, e) => { num.Focus(); num.Select(0, num.Text.Length); };
+
+                if (f.ShowDialog(owner) != DialogResult.OK) return null;
+                return num.Value;
+            }
+        }
+    }
+
+    // =========================================================================
+    // DIALOG: GERENCIAR PESSOAS (para quem as contas são pagas)
+    // =========================================================================
+    public class PeopleManagerDialog : Form
+    {
+        private readonly AppDatabase db;
+        private ListBox lstPeople;
+        public bool Changed { get; private set; }
+
+        public PeopleManagerDialog(AppDatabase database)
+        {
+            db = database;
+
+            Text = "Pessoas - Para quem você paga contas";
+            Size = new Size(500, 470);
+            StartPosition = FormStartPosition.CenterParent;
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            ShowInTaskbar = false;
+            BackColor = Color.White;
+            Font = new Font("Segoe UI", 10F);
+            Icon = AppIconBuilder.CreateAppIcon();
+
+            Label lblInfo = new Label
+            {
+                Text = "Cada pessoa tem a sua própria planilha e o seu resumo.\nA pessoa principal não pode ser excluída (mas pode ser renomeada).",
+                Location = new Point(20, 16),
+                Size = new Size(450, 46),
+                ForeColor = Color.FromArgb(71, 85, 105)
+            };
+            Controls.Add(lblInfo);
+
+            lstPeople = new ListBox
+            {
+                Location = new Point(20, 70),
+                Size = new Size(290, 330),
+                Font = new Font("Segoe UI Semibold", 11F, FontStyle.Bold),
+                IntegralHeight = false,
+                ItemHeight = 30,
+                DrawMode = DrawMode.OwnerDrawFixed
+            };
+            lstPeople.DrawItem += LstPeople_DrawItem;
+            lstPeople.DoubleClick += (s, e) => RenameSelected();
+            Controls.Add(lstPeople);
+
+            Button btnAdd = MakeButton("+ Adicionar", new Point(324, 70), Color.FromArgb(16, 185, 129), Color.White);
+            btnAdd.Click += (s, e) => AddPerson();
+            Controls.Add(btnAdd);
+
+            Button btnRename = MakeButton("Renomear", new Point(324, 118), Color.White, Color.FromArgb(30, 41, 59));
+            btnRename.FlatAppearance.BorderSize = 1;
+            btnRename.FlatAppearance.BorderColor = Color.FromArgb(203, 213, 225);
+            btnRename.Click += (s, e) => RenameSelected();
+            Controls.Add(btnRename);
+
+            Button btnDelete = MakeButton("Excluir", new Point(324, 166), Color.FromArgb(254, 242, 242), Color.FromArgb(185, 28, 28));
+            btnDelete.FlatAppearance.BorderSize = 1;
+            btnDelete.FlatAppearance.BorderColor = Color.FromArgb(254, 202, 202);
+            btnDelete.Click += (s, e) => DeleteSelected();
+            Controls.Add(btnDelete);
+
+            Button btnClose = MakeButton("Fechar", new Point(324, 362), Color.FromArgb(226, 232, 240), Color.FromArgb(51, 65, 85));
+            btnClose.Click += (s, e) => Close();
+            Controls.Add(btnClose);
+            CancelButton = btnClose;
+
+            ReloadList(null);
+        }
+
+        private static Button MakeButton(string text, Point loc, Color back, Color fore)
+        {
+            Button b = new Button
+            {
+                Text = text,
+                Location = loc,
+                Size = new Size(146, 38),
+                BackColor = back,
+                ForeColor = fore,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            b.FlatAppearance.BorderSize = 0;
+            return b;
+        }
+
+        private void LstPeople_DrawItem(object sender, DrawItemEventArgs e)
+        {
+            if (e.Index < 0) return;
+            Person p = (Person)lstPeople.Items[e.Index];
+            bool selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
+            Color back = selected ? Color.FromArgb(15, 23, 42) : Color.White;
+            Color fore = selected ? Color.White : Color.FromArgb(30, 41, 59);
+            using (SolidBrush b = new SolidBrush(back)) e.Graphics.FillRectangle(b, e.Bounds);
+
+            int count = db.Bills.Count(bl => bl.PersonId == p.Id);
+            string text = p.Name + (p.IsMain ? "  (principal)" : "");
+            Rectangle r = new Rectangle(e.Bounds.Left + 8, e.Bounds.Top, e.Bounds.Width - 16, e.Bounds.Height);
+            TextRenderer.DrawText(e.Graphics, text, e.Font, new Rectangle(r.Left, r.Top, r.Width - 80, r.Height), fore,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            TextRenderer.DrawText(e.Graphics, count + " conta(s)", new Font("Segoe UI", 8.5F), r,
+                selected ? Color.FromArgb(203, 213, 225) : Color.FromArgb(100, 116, 139),
+                TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
+        }
+
+        private void ReloadList(string selectId)
+        {
+            lstPeople.Items.Clear();
+            foreach (var p in db.OrderedPeople()) lstPeople.Items.Add(p);
+            for (int i = 0; i < lstPeople.Items.Count; i++)
+            {
+                if (((Person)lstPeople.Items[i]).Id == selectId) { lstPeople.SelectedIndex = i; break; }
+            }
+            if (lstPeople.SelectedIndex < 0 && lstPeople.Items.Count > 0) lstPeople.SelectedIndex = 0;
+        }
+
+        private bool NameExists(string name, string exceptId)
+        {
+            return db.People.Any(p => p.Id != exceptId && string.Equals((p.Name ?? "").Trim(), name.Trim(), StringComparison.CurrentCultureIgnoreCase));
+        }
+
+        private void AddPerson()
+        {
+            string name = PromptDialog.AskText(this, "Adicionar Pessoa", "Nome da pessoa (ex: Vó Maria, Sogra, Filho João):", "");
+            if (name == null) return;
+            if (NameExists(name, null))
+            {
+                MessageBox.Show(this, "Já existe uma pessoa com esse nome.", "Atenção", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            var person = new Person { Name = name };
+            db.People.Add(person);
+            Changed = true;
+            StorageService.Save(db);
+            ReloadList(person.Id);
+        }
+
+        private void RenameSelected()
+        {
+            Person p = lstPeople.SelectedItem as Person;
+            if (p == null) return;
+            string name = PromptDialog.AskText(this, "Renomear Pessoa", "Novo nome para \"" + p.Name + "\":", p.Name);
+            if (name == null || name == p.Name) return;
+            if (NameExists(name, p.Id))
+            {
+                MessageBox.Show(this, "Já existe uma pessoa com esse nome.", "Atenção", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            p.Name = name;
+            Changed = true;
+            StorageService.Save(db);
+            ReloadList(p.Id);
+        }
+
+        private void DeleteSelected()
+        {
+            Person p = lstPeople.SelectedItem as Person;
+            if (p == null) return;
+            if (p.IsMain)
+            {
+                MessageBox.Show(this, "A pessoa principal não pode ser excluída. Você pode apenas renomeá-la.", "Excluir Pessoa", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var bills = db.Bills.Where(b => b.PersonId == p.Id).ToList();
+            string mainName = db.GetPersonName(Person.MainPersonId);
+
+            if (bills.Count == 0)
+            {
+                if (MessageBox.Show(this, "Excluir \"" + p.Name + "\"?", "Excluir Pessoa", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                    return;
+            }
+            else
+            {
+                var res = MessageBox.Show(this,
+                    string.Format("\"{0}\" tem {1} conta(s) cadastrada(s).\n\n" +
+                                  "• SIM = Excluir a pessoa e MOVER as contas para \"{2}\"\n" +
+                                  "• NÃO = Excluir a pessoa e APAGAR as contas dela\n" +
+                                  "• CANCELAR = Não fazer nada", p.Name, bills.Count, mainName),
+                    "Excluir Pessoa", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Warning);
+
+                if (res == DialogResult.Cancel) return;
+                if (res == DialogResult.Yes)
+                {
+                    foreach (var b in bills) b.PersonId = Person.MainPersonId;
+                }
+                else
+                {
+                    if (MessageBox.Show(this,
+                            string.Format("Tem certeza? As {0} conta(s) de \"{1}\" e todo o histórico de pagamentos serão apagados.", bills.Count, p.Name),
+                            "Confirmar Exclusão", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                        return;
+                    var ids = new HashSet<string>(bills.Select(b => b.Id));
+                    db.Bills.RemoveAll(b => ids.Contains(b.Id));
+                    db.Payments.RemoveAll(pay => ids.Contains(pay.BillId));
+                }
+            }
+
+            db.People.Remove(p);
+            Changed = true;
+            StorageService.Save(db);
+            ReloadList(null);
+        }
+    }
+
     // =========================================================================
     // MAIN SPREADSHEET FORM
     // =========================================================================
@@ -1378,6 +1895,11 @@ namespace ContasAPagar
         private int selectedMonth;
         private int selectedYear;
         private string currentFilter = "TODAS"; // TODAS, PENDENTES, PAGAS, ATRASADAS
+        private string selectedPersonId = Person.MainPersonId; // null = Todas as pessoas
+
+        private const int TabAnnual = 0;
+        private const int TabMonthly = 1;
+        private const int TabSummary = 2;
 
         // Controls
         private Label lblCurrentMonthTitle;
@@ -1406,6 +1928,10 @@ namespace ContasAPagar
         private TabControl tabControl;
         private DataGridView gridMonthly;
         private DataGridView gridAnnual;
+        private DataGridView gridSummary;
+
+        private Panel personBar;
+        private FlowLayoutPanel personChipsFlow;
 
         private Panel filterBar;
         private Label lblSearchIcon;
@@ -1542,6 +2068,72 @@ namespace ContasAPagar
             rightTopActions.Controls.Add(btnNewBillTop);
 
             topBar.Controls.Add(rightTopActions);
+
+            // -----------------------------------------------------------------
+            // 1.5 PERSON BAR (Planilha de: Minha Casa | Vó | ... | Todas)
+            // -----------------------------------------------------------------
+            personBar = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 54,
+                BackColor = Color.White,
+                Padding = new Padding(18, 0, 18, 0)
+            };
+            personBar.Paint += (s, e) =>
+            {
+                using (Pen pen = new Pen(Color.FromArgb(226, 232, 240), 1))
+                {
+                    e.Graphics.DrawLine(pen, 0, personBar.Height - 1, personBar.Width, personBar.Height - 1);
+                }
+            };
+
+            Label lblPersonCaption = new Label
+            {
+                Text = "PLANILHA DE:",
+                Font = new Font("Segoe UI Semibold", 9F, FontStyle.Bold),
+                ForeColor = Color.FromArgb(100, 116, 139),
+                AutoSize = false,
+                Size = new Size(104, 54),
+                Dock = DockStyle.Left,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+
+            Button btnManagePeople = new Button
+            {
+                Text = "+ Pessoa / Editar",
+                Size = new Size(150, 33),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(236, 253, 245),
+                ForeColor = Color.FromArgb(6, 95, 70),
+                Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold),
+                Cursor = Cursors.Hand,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
+            };
+            btnManagePeople.FlatAppearance.BorderColor = Color.FromArgb(167, 243, 208);
+            btnManagePeople.Click += BtnManagePeople_Click;
+
+            Panel managePeopleHolder = new Panel
+            {
+                Dock = DockStyle.Right,
+                Width = 160,
+                BackColor = Color.White
+            };
+            btnManagePeople.Location = new Point(10, 10);
+            managePeopleHolder.Controls.Add(btnManagePeople);
+
+            personChipsFlow = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                AutoScroll = false,
+                BackColor = Color.White,
+                Padding = new Padding(0, 10, 0, 0)
+            };
+
+            personBar.Controls.Add(personChipsFlow);
+            personBar.Controls.Add(managePeopleHolder);
+            personBar.Controls.Add(lblPersonCaption);
 
             // -----------------------------------------------------------------
             // 2. PERIOD NAVIGATION + SUMMARY CARDS BAR
@@ -1848,18 +2440,151 @@ namespace ContasAPagar
             gridMonthly = CreateMonthlySpreadsheetGrid();
             tabMonthly.Controls.Add(gridMonthly);
 
-            // Aba Anual como Principal (Tab 0) e Detalhes do Mês como Segunda (Tab 1)
+            TabPage tabSummary = new TabPage("Resumo Geral (Por Pessoa)");
+            tabSummary.BackColor = Color.White;
+            gridSummary = CreateSummaryGrid();
+            tabSummary.Controls.Add(gridSummary);
+
+            // Aba Anual como Principal (Tab 0), Detalhes do Mês (Tab 1) e Resumo Geral (Tab 2)
             tabControl.TabPages.Add(tabAnnual);
             tabControl.TabPages.Add(tabMonthly);
-            tabControl.SelectedIndex = 0;
+            tabControl.TabPages.Add(tabSummary);
+            tabControl.SelectedIndex = TabAnnual;
             mainContainer.Controls.Add(tabControl);
 
             // Add in proper WinForms Dock order
             Controls.Add(mainContainer);
             Controls.Add(filterBar);
             Controls.Add(dashboardPanel);
+            Controls.Add(personBar);
             Controls.Add(topBar);
             Controls.Add(footerBar);
+
+            RebuildPersonChips();
+        }
+
+        // ---------------------------------------------------------------------
+        // PESSOAS (para quem as contas são pagas)
+        // ---------------------------------------------------------------------
+        private const string AllPeopleTag = "__TODAS__";
+
+        private void RebuildPersonChips()
+        {
+            if (selectedPersonId != null && !db.People.Any(p => p.Id == selectedPersonId))
+                selectedPersonId = Person.MainPersonId;
+
+            personChipsFlow.SuspendLayout();
+            foreach (Control c in personChipsFlow.Controls.Cast<Control>().ToList())
+            {
+                personChipsFlow.Controls.Remove(c);
+                c.Dispose();
+            }
+
+            foreach (var person in db.OrderedPeople())
+            {
+                Button chip = CreatePersonChip(person.Name, person.Id, selectedPersonId == person.Id);
+                personChipsFlow.Controls.Add(chip);
+            }
+
+            if (db.People.Count > 1)
+            {
+                Button chipAll = CreatePersonChip("Todas as Pessoas", AllPeopleTag, selectedPersonId == null);
+                chipAll.Margin = new Padding(14, 0, 0, 0);
+                personChipsFlow.Controls.Add(chipAll);
+            }
+            personChipsFlow.ResumeLayout();
+        }
+
+        private Button CreatePersonChip(string text, string tag, bool active)
+        {
+            Button btn = new Button
+            {
+                Text = text,
+                Tag = tag,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                MinimumSize = new Size(90, 33),
+                MaximumSize = new Size(220, 33),
+                Padding = new Padding(10, 0, 10, 0),
+                Margin = new Padding(0, 0, 6, 0),
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold),
+                Cursor = Cursors.Hand,
+                AutoEllipsis = true
+            };
+            StyleFilterChip(btn, active);
+            btn.Click += (s, e) => SelectPerson(tag == AllPeopleTag ? null : tag);
+            return btn;
+        }
+
+        private void SelectPerson(string personId)
+        {
+            selectedPersonId = personId;
+            foreach (Control c in personChipsFlow.Controls)
+            {
+                Button b = c as Button;
+                if (b == null) continue;
+                string tag = b.Tag as string;
+                bool active = (personId == null) ? tag == AllPeopleTag : tag == personId;
+                StyleFilterChip(b, active);
+            }
+            RefreshAllViews();
+        }
+
+        private void BtnManagePeople_Click(object sender, EventArgs e)
+        {
+            using (var dlg = new PeopleManagerDialog(db))
+            {
+                dlg.ShowDialog(this);
+                if (dlg.Changed)
+                {
+                    db.EnsureIntegrity();
+                    RebuildPersonChips();
+                    RefreshAllViews();
+                }
+            }
+        }
+
+        /// <summary>Contas ativas da pessoa selecionada (ou de todas, se "Todas as Pessoas").</summary>
+        private IEnumerable<BillDefinition> BillsInScope()
+        {
+            return db.Bills.Where(b => b.Active && (selectedPersonId == null || b.PersonId == selectedPersonId));
+        }
+
+        private string ScopeName()
+        {
+            return selectedPersonId == null ? "Todas as Pessoas" : db.GetPersonName(selectedPersonId);
+        }
+
+        private static decimal GetMonthAmount(BillDefinition bill, MonthlyPaymentRecord rec)
+        {
+            return (rec != null && rec.CustomAmount > 0) ? rec.CustomAmount : bill.Amount;
+        }
+
+        /// <summary>Conta variável cujo valor real do mês ainda não foi informado (está usando a estimativa).</summary>
+        private static bool IsAmountPending(BillDefinition bill, MonthlyPaymentRecord rec)
+        {
+            return bill.IsVariableAmount && (rec == null || rec.CustomAmount <= 0);
+        }
+
+        /// <summary>
+        /// Pergunta o valor real de uma conta variável para um mês. Retorna false se cancelado.
+        /// </summary>
+        private bool AskVariableAmount(BillDefinition bill, int year, int month)
+        {
+            var rec = GetOrCreatePaymentRecord(bill.Id, year, month, false);
+            decimal initial = GetMonthAmount(bill, rec);
+            decimal? val = PromptDialog.AskAmount(
+                this,
+                "Valor da Conta",
+                string.Format("Qual foi o valor de \"{0}\" em {1}/{2}?", bill.Name, FullMonths[month - 1], year),
+                initial);
+            if (val == null) return false;
+
+            rec = GetOrCreatePaymentRecord(bill.Id, year, month, true);
+            rec.CustomAmount = val.Value;
+            if (val.Value > 0) bill.Amount = val.Value; // vira a estimativa para os próximos meses
+            return true;
         }
 
         private DataGridView CreateMonthlySpreadsheetGrid()
@@ -1950,6 +2675,19 @@ namespace ContasAPagar
             };
             colName.DefaultCellStyle.Font = new Font("Segoe UI Semibold", 10.5F, FontStyle.Bold);
             dgv.Columns.Add(colName);
+
+            // 2b: Pessoa (visível só em "Todas as Pessoas")
+            var colPerson = new DataGridViewTextBoxColumn
+            {
+                Name = "ColPerson",
+                HeaderText = "PESSOA",
+                FillWeight = 70,
+                MinimumWidth = 100,
+                ReadOnly = true,
+                Visible = false
+            };
+            colPerson.DefaultCellStyle.ForeColor = Color.FromArgb(71, 85, 105);
+            dgv.Columns.Add(colPerson);
 
             // 3: Categoria
             var colCategory = new DataGridViewTextBoxColumn
@@ -2143,8 +2881,95 @@ namespace ContasAPagar
 
             dgv.CellPainting += DgvAnnual_CellPainting;
             dgv.CellClick += DgvAnnual_CellClick;
+            dgv.CellMouseClick += DgvAnnual_CellMouseClick;
             dgv.CellDoubleClick += DgvAnnual_CellDoubleClick;
             dgv.ColumnHeaderMouseClick += DgvAnnual_ColumnHeaderMouseClick;
+            return dgv;
+        }
+
+        private DataGridView CreateSummaryGrid()
+        {
+            DataGridView dgv = new DataGridView
+            {
+                Dock = DockStyle.Fill,
+                BackgroundColor = Color.White,
+                BorderStyle = BorderStyle.None,
+                CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
+                GridColor = Color.FromArgb(226, 232, 240),
+                RowHeadersVisible = false,
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                AllowUserToResizeRows = false,
+                ReadOnly = true,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                MultiSelect = false,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+                EnableHeadersVisualStyles = false,
+                RowTemplate = { Height = 38 }
+            };
+
+            typeof(DataGridView).InvokeMember(
+                "DoubleBuffered",
+                BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.SetProperty,
+                null,
+                dgv,
+                new object[] { true });
+
+            dgv.ColumnHeadersHeight = 44;
+            dgv.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
+            dgv.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
+            {
+                BackColor = Color.FromArgb(248, 250, 252),
+                ForeColor = Color.FromArgb(51, 65, 85),
+                Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold),
+                Alignment = DataGridViewContentAlignment.MiddleRight,
+                Padding = new Padding(8, 0, 8, 0),
+                SelectionBackColor = Color.FromArgb(248, 250, 252),
+                SelectionForeColor = Color.FromArgb(51, 65, 85)
+            };
+            dgv.DefaultCellStyle = new DataGridViewCellStyle
+            {
+                BackColor = Color.White,
+                ForeColor = Color.FromArgb(30, 41, 59),
+                Font = new Font("Segoe UI", 10F),
+                SelectionBackColor = Color.FromArgb(241, 245, 249),
+                SelectionForeColor = Color.FromArgb(15, 23, 42),
+                Alignment = DataGridViewContentAlignment.MiddleRight,
+                Padding = new Padding(8, 0, 8, 0)
+            };
+
+            Action<string, string, float, int> addCol = (name, header, weight, minW) =>
+            {
+                var col = new DataGridViewTextBoxColumn
+                {
+                    Name = name,
+                    HeaderText = header,
+                    FillWeight = weight,
+                    MinimumWidth = minW,
+                    ReadOnly = true,
+                    SortMode = DataGridViewColumnSortMode.NotSortable
+                };
+                dgv.Columns.Add(col);
+            };
+
+            addCol("SumName", "PESSOA / CATEGORIA", 170, 200);
+            addCol("SumCount", "CONTAS", 50, 70);
+            addCol("SumMonth", "NO MÊS", 85, 110);
+            addCol("SumYear", "TOTAL NO ANO", 90, 120);
+            addCol("SumAvg", "MÉDIA / MÊS", 80, 105);
+            addCol("SumPaid", "JÁ PAGO NO ANO", 90, 120);
+            addCol("SumPending", "FALTA PAGAR", 90, 120);
+            addCol("SumShare", "% DO TOTAL", 90, 120);
+
+            dgv.Columns["SumName"].HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleLeft;
+            dgv.Columns["SumName"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleLeft;
+            dgv.Columns["SumCount"].HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            dgv.Columns["SumCount"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            dgv.Columns["SumPaid"].DefaultCellStyle.ForeColor = Color.FromArgb(21, 128, 61);
+            dgv.Columns["SumPending"].DefaultCellStyle.ForeColor = Color.FromArgb(190, 18, 60);
+
+            dgv.CellPainting += DgvSummary_CellPainting;
+            dgv.CellDoubleClick += DgvSummary_CellDoubleClick;
             return dgv;
         }
 
@@ -2159,6 +2984,7 @@ namespace ContasAPagar
                 SyncTabContext();
                 PopulateMonthlyGrid();
                 PopulateAnnualGrid();
+                PopulateSummaryGrid();
             }
             finally
             {
@@ -2168,17 +2994,29 @@ namespace ContasAPagar
 
         private void SyncTabContext()
         {
-            if (tabControl.SelectedIndex == 0)
+            bool isSummary = tabControl.SelectedIndex == TabSummary;
+            foreach (Control c in new Control[] { btnFilterAll, btnFilterPending, btnFilterPaid, btnFilterOverdue, lblSearchIcon, txtSearch, btnEditSelected, btnDeleteSelected })
+            {
+                if (c != null) c.Visible = !isSummary;
+            }
+
+            if (tabControl.SelectedIndex == TabAnnual)
             {
                 lblMonthCaption.Text = "ANO DE REFERÊNCIA (VISÃO ANUAL)";
-                lblCurrentMonthTitle.Text = string.Format("Visão Anual Consolidada — Ano {0}", selectedYear);
-                lblStatusFooter.Text = "• Dica: Na Visão Anual, clique em qualquer mês (Jan a Dez) para marcar ou desmarcar o pagamento (✔). Duplo clique na conta para editar.";
+                lblCurrentMonthTitle.Text = string.Format("Visão Anual — Ano {0}", selectedYear);
+                lblStatusFooter.Text = "• Dica: Clique em um mês (Jan a Dez) para marcar/desmarcar o pagamento (✔). Botão direito no mês informa o valor (contas de valor variável). Duplo clique na conta para editar.";
             }
-            else
+            else if (tabControl.SelectedIndex == TabMonthly)
             {
                 lblMonthCaption.Text = "MÊS DE REFERÊNCIA DA PLANILHA";
                 lblCurrentMonthTitle.Text = string.Format("Planilha de {0} de {1}", FullMonths[selectedMonth - 1], selectedYear);
-                lblStatusFooter.Text = "• Dica: Marque a caixinha '✔ PAGA?' para marcar como paga. Você também pode alterar o valor do mês diretamente na planilha.";
+                lblStatusFooter.Text = "• Dica: Marque a caixinha '✔ PAGA?' para marcar como paga. Duplo clique no VALOR para digitar o valor do mês (ex: conta de luz, água).";
+            }
+            else
+            {
+                lblMonthCaption.Text = "ANO DE REFERÊNCIA (RESUMO GERAL)";
+                lblCurrentMonthTitle.Text = string.Format("Resumo Geral por Pessoa e Categoria — {0}", selectedYear);
+                lblStatusFooter.Text = string.Format("• Dica: Veja quanto você gasta com cada pessoa e em cada tipo de conta. A coluna \"No Mês\" mostra {0}/{1}. Duplo clique numa pessoa para abrir a planilha dela.", FullMonths[selectedMonth - 1], selectedYear);
             }
         }
 
@@ -2195,9 +3033,11 @@ namespace ContasAPagar
             int countPending = 0;
 
             string search = (txtSearch.Text ?? "").Trim().ToLowerInvariant();
+            bool showPerson = selectedPersonId == null;
+            gridMonthly.Columns["ColPerson"].Visible = showPerson;
+            CultureInfo ptBrCulture = new CultureInfo("pt-BR");
 
-            var orderedBills = db.Bills
-                .Where(b => b.Active)
+            var orderedBills = BillsInScope()
                 .OrderBy(b => b.DueDay)
                 .ThenBy(b => b.Name)
                 .ToList();
@@ -2210,7 +3050,8 @@ namespace ContasAPagar
 
                 var payment = GetOrCreatePaymentRecord(bill.Id, selectedYear, selectedMonth, false);
                 bool isPaid = payment != null && payment.IsPaid;
-                decimal amount = (payment != null && payment.CustomAmount > 0) ? payment.CustomAmount : bill.Amount;
+                decimal amount = GetMonthAmount(bill, payment);
+                bool amountPending = IsAmountPending(bill, payment);
 
                 // Totals always reflect all active bills in the month
                 totalMonth += amount;
@@ -2239,7 +3080,8 @@ namespace ContasAPagar
                 {
                     bool match = (bill.Name ?? "").ToLowerInvariant().Contains(search) ||
                                  (bill.Category ?? "").ToLowerInvariant().Contains(search) ||
-                                 (bill.Notes ?? "").ToLowerInvariant().Contains(search);
+                                 (bill.Notes ?? "").ToLowerInvariant().Contains(search) ||
+                                 db.GetPersonName(bill.PersonId).ToLowerInvariant().Contains(search);
                     if (!match) continue;
                 }
 
@@ -2247,7 +3089,14 @@ namespace ContasAPagar
 
                 string recurrenceText = bill.RecurrenceCount > 0
                     ? string.Format("Parcela {0} de {1}", installmentNum, bill.RecurrenceCount)
-                    : "Fixa Mensal";
+                    : (bill.IsVariableAmount ? "Variável" : "Fixa Mensal");
+                if (bill.IsVariableAmount && bill.RecurrenceCount > 0) recurrenceText += " (var.)";
+
+                string amountText;
+                if (amountPending)
+                    amountText = amount > 0 ? "~ " + amount.ToString("N2", ptBrCulture) : "informar";
+                else
+                    amountText = amount.ToString("N2", ptBrCulture);
 
                 string startText = string.Format("{0}/{1}", ShortMonths[Math.Min(11, Math.Max(0, bill.StartMonth - 1))], bill.StartYear);
 
@@ -2307,10 +3156,11 @@ namespace ContasAPagar
                     isPaid,
                     dueDateFormatted,
                     bill.Name,
+                    db.GetPersonName(bill.PersonId),
                     bill.Category,
                     recurrenceText,
                     startText,
-                    amount.ToString("N2", new CultureInfo("pt-BR")),
+                    amountText,
                     statusText,
                     noteCellText
                 );
@@ -2318,6 +3168,13 @@ namespace ContasAPagar
                 DataGridViewRow row = gridMonthly.Rows[rowIndex];
                 row.Tag = bill.Id;
                 row.DefaultCellStyle.BackColor = rowBack;
+
+                if (amountPending)
+                {
+                    row.Cells["ColAmount"].Style.ForeColor = Color.FromArgb(180, 83, 9);
+                    row.Cells["ColAmount"].Style.Font = new Font("Segoe UI", 10F, FontStyle.Italic);
+                    row.Cells["ColAmount"].ToolTipText = "Valor variável: clique duas vezes para digitar o valor deste mês.";
+                }
 
                 if (isPaid)
                 {
@@ -2360,13 +3217,14 @@ namespace ContasAPagar
             gridAnnual.Rows.Clear();
             CultureInfo ptBr = new CultureInfo("pt-BR");
 
-            var orderedBills = db.Bills
-                .Where(b => b.Active)
+            var orderedBills = BillsInScope()
                 .OrderBy(b => b.DueDay)
                 .ThenBy(b => b.Name)
                 .ToList();
 
             string search = (txtSearch.Text ?? "").Trim().ToLowerInvariant();
+            bool showPerson = selectedPersonId == null;
+            gridAnnual.Columns["AnnualBillName"].FillWeight = showPerson ? 240 : 165;
 
             decimal[] monthTotals = new decimal[12];
             decimal[] monthPaidTotals = new decimal[12];
@@ -2395,7 +3253,7 @@ namespace ContasAPagar
                         billTotalCount++;
                         var rec = GetOrCreatePaymentRecord(bill.Id, selectedYear, m, false);
                         bool isPaid = rec != null && rec.IsPaid;
-                        decimal amount = (rec != null && rec.CustomAmount > 0) ? rec.CustomAmount : bill.Amount;
+                        decimal amount = GetMonthAmount(bill, rec);
                         billYearTotal += amount;
                         monthTotals[m - 1] += amount;
 
@@ -2428,7 +3286,8 @@ namespace ContasAPagar
                 {
                     bool match = (bill.Name ?? "").ToLowerInvariant().Contains(search) ||
                                  (bill.Category ?? "").ToLowerInvariant().Contains(search) ||
-                                 (bill.Notes ?? "").ToLowerInvariant().Contains(search);
+                                 (bill.Notes ?? "").ToLowerInvariant().Contains(search) ||
+                                 db.GetPersonName(bill.PersonId).ToLowerInvariant().Contains(search);
                     if (!match) continue;
                 }
 
@@ -2438,8 +3297,10 @@ namespace ContasAPagar
                 if (currentFilter == "ATRASADAS" && !billHasOverdue) continue;
 
                 object[] rowVals = new object[15];
-                string recInfo = bill.RecurrenceCount > 0 ? string.Format(" ({0}x)", bill.RecurrenceCount) : " (Fixa)";
-                rowVals[0] = bill.Name + recInfo;
+                string recInfo = bill.RecurrenceCount > 0
+                    ? string.Format(bill.IsVariableAmount ? "{0}x, variável" : "{0}x", bill.RecurrenceCount)
+                    : (bill.IsVariableAmount ? "Variável" : "Fixa");
+                rowVals[0] = (showPerson ? db.GetPersonName(bill.PersonId) + " · " : "") + bill.Name + " (" + recInfo + ")";
                 rowVals[1] = "Dia " + bill.DueDay.ToString("00");
 
                 for (int m = 1; m <= 12; m++)
@@ -2507,8 +3368,8 @@ namespace ContasAPagar
                 sRow2.DefaultCellStyle.Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold);
             }
 
-            // If Visão Anual is the active tab, update the Dashboard Summary Cards with Year stats
-            if (tabControl.SelectedIndex == 0)
+            // If Visão Anual or Resumo Geral is the active tab, update the Dashboard Summary Cards with Year stats
+            if (tabControl.SelectedIndex == TabAnnual || tabControl.SelectedIndex == TabSummary)
             {
                 lblCardTotalTitle.Text = string.Format("TOTAL PREVISTO ({0})", selectedYear);
                 lblCardTotalValue.Text = grandYearTotal.ToString("C2", ptBr);
@@ -2527,6 +3388,182 @@ namespace ContasAPagar
         }
 
         // ---------------------------------------------------------------------
+        // RESUMO GERAL (POR PESSOA E CATEGORIA)
+        // ---------------------------------------------------------------------
+        private class SummaryAgg
+        {
+            public string Label;
+            public int Count;
+            public decimal Month;
+            public decimal Year;
+            public decimal Paid;
+            public decimal Pending { get { return Year - Paid; } }
+        }
+
+        private SummaryAgg AggregateBills(string label, IEnumerable<BillDefinition> bills)
+        {
+            var agg = new SummaryAgg { Label = label };
+            foreach (var bill in bills)
+            {
+                bool applies = false;
+                for (int m = 1; m <= 12; m++)
+                {
+                    int inst;
+                    if (!bill.AppliesToMonth(selectedYear, m, out inst)) continue;
+                    applies = true;
+                    var rec = GetOrCreatePaymentRecord(bill.Id, selectedYear, m, false);
+                    decimal amount = GetMonthAmount(bill, rec);
+                    agg.Year += amount;
+                    if (rec != null && rec.IsPaid) agg.Paid += amount;
+                    if (m == selectedMonth) agg.Month += amount;
+                }
+                if (applies) agg.Count++;
+            }
+            return agg;
+        }
+
+        private void PopulateSummaryGrid()
+        {
+            gridSummary.Rows.Clear();
+            CultureInfo ptBr = new CultureInfo("pt-BR");
+            gridSummary.Columns["SumMonth"].HeaderText = string.Format("NO MÊS ({0}/{1})", ShortMonths[selectedMonth - 1].ToUpper(), selectedYear);
+            gridSummary.Columns["SumYear"].HeaderText = string.Format("TOTAL EM {0}", selectedYear);
+
+            var people = selectedPersonId == null
+                ? db.OrderedPeople()
+                : db.People.Where(p => p.Id == selectedPersonId).ToList();
+
+            var activeBills = db.Bills.Where(b => b.Active).ToList();
+            var grand = AggregateBills("∑ TOTAL GERAL (TODAS AS PESSOAS)", activeBills.Where(b => people.Any(p => p.Id == b.PersonId)));
+            decimal shareBase = grand.Year;
+
+            Action<SummaryAgg, string, decimal> addRow = (agg, tag, baseForShare) =>
+            {
+                decimal share = baseForShare > 0 ? agg.Year / baseForShare : 0m;
+                int idx = gridSummary.Rows.Add(
+                    agg.Label,
+                    agg.Count,
+                    agg.Month.ToString("C2", ptBr),
+                    agg.Year.ToString("C2", ptBr),
+                    (agg.Year / 12m).ToString("C2", ptBr),
+                    agg.Paid.ToString("C2", ptBr),
+                    agg.Pending.ToString("C2", ptBr),
+                    share);
+                gridSummary.Rows[idx].Tag = tag;
+            };
+
+            foreach (var person in people)
+            {
+                var personBills = activeBills.Where(b => b.PersonId == person.Id).ToList();
+                var personAgg = AggregateBills(person.Name.ToUpper(), personBills);
+                // Pessoa sem contas no ano continua aparecendo (com R$ 0), para não "sumir" do resumo
+                addRow(personAgg, "P:" + person.Id, shareBase);
+
+                var byCategory = personBills
+                    .GroupBy(b => string.IsNullOrWhiteSpace(b.Category) ? "Geral" : b.Category.Trim(), StringComparer.CurrentCultureIgnoreCase)
+                    .Select(g => AggregateBills("      " + g.Key, g))
+                    .Where(a => a.Count > 0)
+                    .OrderByDescending(a => a.Year)
+                    .ToList();
+
+                foreach (var cat in byCategory)
+                {
+                    // % da categoria em relação ao total daquela pessoa
+                    addRow(cat, "C:" + person.Id, personAgg.Year);
+                }
+            }
+
+            if (people.Count > 1)
+            {
+                addRow(grand, "GRAND", shareBase);
+            }
+
+            if (people.Count == 1 && gridSummary.Rows.Count <= 1)
+            {
+                int idx = gridSummary.Rows.Add("      Nenhuma conta cadastrada neste ano.", "", "", "", "", "", "", 0m);
+                gridSummary.Rows[idx].Tag = "EMPTY";
+            }
+        }
+
+        private void DgvSummary_CellPainting(object sender, DataGridViewCellPaintingEventArgs e)
+        {
+            if (e.RowIndex < 0) return;
+            DataGridViewRow row = gridSummary.Rows[e.RowIndex];
+            string tag = row.Tag as string ?? "";
+            bool isPersonRow = tag.StartsWith("P:");
+            bool isGrandRow = tag == "GRAND";
+            bool isCategoryRow = tag.StartsWith("C:");
+
+            Color bg = isGrandRow ? Color.FromArgb(15, 23, 42)
+                : isPersonRow ? Color.FromArgb(241, 245, 249)
+                : Color.White;
+            if (row.Selected && !isGrandRow) bg = Color.FromArgb(226, 232, 240);
+            Color fg = isGrandRow ? Color.White : Color.FromArgb(30, 41, 59);
+
+            string colName = gridSummary.Columns[e.ColumnIndex].Name;
+            if (!isGrandRow && colName == "SumPaid") fg = Color.FromArgb(21, 128, 61);
+            if (!isGrandRow && colName == "SumPending") fg = Color.FromArgb(190, 18, 60);
+            if (isCategoryRow && colName == "SumName") fg = Color.FromArgb(71, 85, 105);
+
+            using (SolidBrush b = new SolidBrush(bg)) e.Graphics.FillRectangle(b, e.CellBounds);
+            using (Pen p = new Pen(Color.FromArgb(226, 232, 240)))
+                e.Graphics.DrawLine(p, e.CellBounds.Left, e.CellBounds.Bottom - 1, e.CellBounds.Right, e.CellBounds.Bottom - 1);
+
+            Font f = (isPersonRow || isGrandRow)
+                ? new Font("Segoe UI Semibold", 10F, FontStyle.Bold)
+                : new Font("Segoe UI", 10F);
+
+            Rectangle r = new Rectangle(e.CellBounds.Left + 8, e.CellBounds.Top, e.CellBounds.Width - 16, e.CellBounds.Height);
+
+            if (colName == "SumShare")
+            {
+                decimal share = 0m;
+                if (e.Value is decimal) share = (decimal)e.Value;
+                if (tag != "EMPTY")
+                {
+                    int barMaxW = Math.Max(10, r.Width - 52);
+                    int barW = (int)(barMaxW * Math.Min(1m, Math.Max(0m, share)));
+                    Rectangle track = new Rectangle(r.Left, r.Top + r.Height / 2 - 4, barMaxW, 8);
+                    using (SolidBrush tb = new SolidBrush(isGrandRow ? Color.FromArgb(51, 65, 85) : Color.FromArgb(226, 232, 240)))
+                        e.Graphics.FillRectangle(tb, track);
+                    Color barColor = isCategoryRow ? Color.FromArgb(96, 165, 250) : Color.FromArgb(16, 185, 129);
+                    if (barW > 0)
+                        using (SolidBrush bb = new SolidBrush(barColor))
+                            e.Graphics.FillRectangle(bb, new Rectangle(track.Left, track.Top, barW, track.Height));
+                    TextRenderer.DrawText(e.Graphics, share.ToString("P0", new CultureInfo("pt-BR")), f, r, fg,
+                        TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+                }
+            }
+            else
+            {
+                string text = Convert.ToString(e.Value) ?? "";
+                TextFormatFlags flags = TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis;
+                if (colName == "SumName") flags |= TextFormatFlags.Left;
+                else if (colName == "SumCount") flags |= TextFormatFlags.HorizontalCenter;
+                else flags |= TextFormatFlags.Right;
+                TextRenderer.DrawText(e.Graphics, text, f, r, fg, flags);
+            }
+
+            e.Handled = true;
+        }
+
+        private void DgvSummary_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0) return;
+            string tag = gridSummary.Rows[e.RowIndex].Tag as string ?? "";
+            if (!tag.StartsWith("P:") && !tag.StartsWith("C:")) return;
+            string personId = tag.Substring(2);
+            if (!db.People.Any(p => p.Id == personId)) return;
+
+            // Adiado: trocar de aba recria as linhas desta mesma grade
+            BeginInvoke((Action)(() =>
+            {
+                tabControl.SelectedIndex = TabAnnual;
+                SelectPerson(personId);
+            }));
+        }
+
+        // ---------------------------------------------------------------------
         // GRID INTERACTION EVENTS
         // ---------------------------------------------------------------------
         private void DgvMonthly_CellValueChanged(object sender, DataGridViewCellEventArgs e)
@@ -2540,11 +3577,30 @@ namespace ContasAPagar
             var bill = db.Bills.FirstOrDefault(b => b.Id == billId);
             if (bill == null) return;
 
-            var record = GetOrCreatePaymentRecord(billId, selectedYear, selectedMonth, true);
-
             if (e.ColumnIndex == gridMonthly.Columns["ColPaid"].Index)
             {
                 bool isChecked = Convert.ToBoolean(row.Cells["ColPaid"].Value);
+                int year = selectedYear, month = selectedMonth;
+
+                if (isChecked && IsAmountPending(bill, GetOrCreatePaymentRecord(billId, year, month, false)))
+                {
+                    // Conta de valor variável: pergunta o valor real antes de marcar como paga.
+                    // Adiado para fora do evento da grade, para não abrir janela no meio da edição.
+                    BeginInvoke((Action)(() =>
+                    {
+                        if (AskVariableAmount(bill, year, month))
+                        {
+                            var r = GetOrCreatePaymentRecord(billId, year, month, true);
+                            r.IsPaid = true;
+                            r.PaidDateStr = DateTime.Now.ToString("dd/MM/yyyy");
+                            StorageService.Save(db);
+                        }
+                        RefreshAllViews();
+                    }));
+                    return;
+                }
+
+                var record = GetOrCreatePaymentRecord(billId, year, month, true);
                 record.IsPaid = isChecked;
                 record.PaidDateStr = isChecked ? DateTime.Now.ToString("dd/MM/yyyy") : "";
                 StorageService.Save(db);
@@ -2553,18 +3609,22 @@ namespace ContasAPagar
             else if (e.ColumnIndex == gridMonthly.Columns["ColAmount"].Index)
             {
                 string raw = Convert.ToString(row.Cells["ColAmount"].Value) ?? "";
-                raw = raw.Replace("R$", "").Trim();
+                raw = raw.Replace("R$", "").Replace("~", "").Trim();
                 decimal val;
                 if (decimal.TryParse(raw, NumberStyles.Any, new CultureInfo("pt-BR"), out val) && val >= 0)
                 {
+                    var record = GetOrCreatePaymentRecord(billId, selectedYear, selectedMonth, true);
                     record.CustomAmount = val;
-                    bill.Amount = val;
+                    // Conta de valor fixo: o novo valor passa a valer como padrão.
+                    // Conta variável: o valor digitado vira a estimativa dos meses ainda não informados.
+                    if (val > 0) bill.Amount = val;
                     StorageService.Save(db);
                 }
-                RefreshAllViews();
+                BeginInvoke((Action)RefreshAllViews);
             }
             else if (e.ColumnIndex == gridMonthly.Columns["ColNotes"].Index)
             {
+                var record = GetOrCreatePaymentRecord(billId, selectedYear, selectedMonth, true);
                 string note = Convert.ToString(row.Cells["ColNotes"].Value) ?? "";
                 record.CustomNotes = note;
                 StorageService.Save(db);
@@ -2574,6 +3634,24 @@ namespace ContasAPagar
         private void DgvMonthly_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
         {
             if (e.RowIndex < 0 || e.ColumnIndex == 0) return;
+
+            // Duplo clique no valor ou na observação: edita direto na célula
+            if (e.ColumnIndex == gridMonthly.Columns["ColAmount"].Index || e.ColumnIndex == gridMonthly.Columns["ColNotes"].Index)
+            {
+                gridMonthly.CurrentCell = gridMonthly.Rows[e.RowIndex].Cells[e.ColumnIndex];
+                if (e.ColumnIndex == gridMonthly.Columns["ColAmount"].Index)
+                {
+                    string cur = Convert.ToString(gridMonthly.CurrentCell.Value) ?? "";
+                    if (cur == "informar")
+                    {
+                        isPopulating = true;
+                        try { gridMonthly.CurrentCell.Value = ""; }
+                        finally { isPopulating = false; }
+                    }
+                }
+                gridMonthly.BeginEdit(true);
+                return;
+            }
             BtnEditSelected_Click(sender, EventArgs.Empty);
         }
 
@@ -2591,6 +3669,18 @@ namespace ContasAPagar
             int inst;
             if (!bill.AppliesToMonth(selectedYear, monthClicked, out inst)) return;
 
+            var existing = GetOrCreatePaymentRecord(billId, selectedYear, monthClicked, false);
+            bool willBePaid = existing == null || !existing.IsPaid;
+            if (willBePaid && IsAmountPending(bill, existing))
+            {
+                // Conta de valor variável: pergunta o valor do mês antes de marcar como paga
+                if (!AskVariableAmount(bill, selectedYear, monthClicked))
+                {
+                    RefreshAllViews();
+                    return;
+                }
+            }
+
             var rec = GetOrCreatePaymentRecord(billId, selectedYear, monthClicked, true);
             rec.IsPaid = !rec.IsPaid;
             rec.PaidDateStr = rec.IsPaid ? DateTime.Now.ToString("dd/MM/yyyy") : "";
@@ -2603,6 +3693,34 @@ namespace ContasAPagar
                 rec.IsPaid ? "PAGA" : "PENDENTE",
                 ShortMonths[monthClicked - 1],
                 selectedYear);
+        }
+
+        /// <summary>Botão direito numa célula de mês: informar/alterar o valor daquele mês.</summary>
+        private void DgvAnnual_CellMouseClick(object sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Right || isPopulating) return;
+            if (e.RowIndex < 0 || e.ColumnIndex < 2 || e.ColumnIndex > 13) return;
+
+            string billId = gridAnnual.Rows[e.RowIndex].Tag as string;
+            if (string.IsNullOrEmpty(billId) || billId.StartsWith("SUMMARY_")) return;
+
+            int monthClicked = e.ColumnIndex - 1;
+            var bill = db.Bills.FirstOrDefault(b => b.Id == billId);
+            if (bill == null) return;
+
+            int inst;
+            if (!bill.AppliesToMonth(selectedYear, monthClicked, out inst)) return;
+
+            gridAnnual.CurrentCell = gridAnnual.Rows[e.RowIndex].Cells[e.ColumnIndex];
+            if (AskVariableAmount(bill, selectedYear, monthClicked))
+            {
+                StorageService.Save(db);
+                RefreshAllViews();
+                var rec = GetOrCreatePaymentRecord(billId, selectedYear, monthClicked, false);
+                lblStatusFooter.Text = string.Format("✔ Valor de '{0}' em {1}/{2} definido para {3}.",
+                    bill.Name, ShortMonths[monthClicked - 1], selectedYear,
+                    GetMonthAmount(bill, rec).ToString("C2", new CultureInfo("pt-BR")));
+            }
         }
 
         private void DgvAnnual_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
@@ -2838,7 +3956,7 @@ namespace ContasAPagar
         // ---------------------------------------------------------------------
         private void BtnNewBill_Click(object sender, EventArgs e)
         {
-            using (var dlg = new BillDialog(null, selectedMonth, selectedYear))
+            using (var dlg = new BillDialog(null, selectedMonth, selectedYear, db.OrderedPeople(), selectedPersonId ?? Person.MainPersonId))
             {
                 if (dlg.ShowDialog(this) == DialogResult.OK && dlg.ResultBill != null)
                 {
@@ -2849,7 +3967,12 @@ namespace ContasAPagar
                     selectedMonth = dlg.ResultBill.StartMonth;
                     selectedYear = dlg.ResultBill.StartYear;
                     SyncMonthYearControls();
-                    RefreshAllViews();
+
+                    // Se a conta é de outra pessoa, mostra a planilha dessa pessoa
+                    if (selectedPersonId != null && selectedPersonId != dlg.ResultBill.PersonId)
+                        SelectPerson(dlg.ResultBill.PersonId);
+                    else
+                        RefreshAllViews();
                 }
             }
         }
@@ -2866,10 +3989,12 @@ namespace ContasAPagar
             var bill = db.Bills.FirstOrDefault(b => b.Id == billId);
             if (bill == null) return;
 
-            using (var dlg = new BillDialog(bill, selectedMonth, selectedYear))
+            using (var dlg = new BillDialog(bill, selectedMonth, selectedYear, db.OrderedPeople(), bill.PersonId))
             {
                 if (dlg.ShowDialog(this) == DialogResult.OK && dlg.ResultBill != null)
                 {
+                    bill.PersonId = dlg.ResultBill.PersonId;
+                    bill.IsVariableAmount = dlg.ResultBill.IsVariableAmount;
                     bill.Name = dlg.ResultBill.Name;
                     bill.Category = dlg.ResultBill.Category;
                     bill.Amount = dlg.ResultBill.Amount;
@@ -2880,7 +4005,10 @@ namespace ContasAPagar
                     bill.Notes = dlg.ResultBill.Notes;
 
                     StorageService.Save(db);
-                    RefreshAllViews();
+                    if (selectedPersonId != null && selectedPersonId != bill.PersonId)
+                        SelectPerson(bill.PersonId);
+                    else
+                        RefreshAllViews();
                 }
             }
         }
@@ -2917,19 +4045,44 @@ namespace ContasAPagar
         {
             using (SaveFileDialog sfd = new SaveFileDialog())
             {
-                bool isAnnual = (tabControl.SelectedIndex == 0);
-                sfd.Title = isAnnual
-                    ? "Exportar Visão Anual para Excel (CSV)"
-                    : "Exportar Planilha do Mês para Excel (CSV)";
+                bool isAnnual = (tabControl.SelectedIndex == TabAnnual);
+                bool isSummary = (tabControl.SelectedIndex == TabSummary);
+                string scopeFile = SafeFileName(ScopeName());
+                sfd.Title = isSummary
+                    ? "Exportar Resumo Geral para Excel (CSV)"
+                    : isAnnual
+                        ? "Exportar Visão Anual para Excel (CSV)"
+                        : "Exportar Planilha do Mês para Excel (CSV)";
                 sfd.Filter = "Planilha CSV (*.csv)|*.csv";
-                sfd.FileName = isAnnual
-                    ? string.Format("Contas_Visao_Anual_{0}.csv", selectedYear)
-                    : string.Format("Contas_{0}_{1}.csv", FullMonths[selectedMonth - 1], selectedYear);
+                sfd.FileName = isSummary
+                    ? string.Format("Resumo_Geral_{0}_{1}.csv", scopeFile, selectedYear)
+                    : isAnnual
+                        ? string.Format("Contas_{0}_Visao_Anual_{1}.csv", scopeFile, selectedYear)
+                        : string.Format("Contas_{0}_{1}_{2}.csv", scopeFile, FullMonths[selectedMonth - 1], selectedYear);
 
                 if (sfd.ShowDialog(this) == DialogResult.OK)
                 {
                     StringBuilder sb = new StringBuilder();
-                    if (isAnnual)
+                    if (isSummary)
+                    {
+                        sb.AppendLine(string.Format("Pessoa / Categoria;Contas;No Mes ({0}/{1});Total no Ano;Media por Mes;Ja Pago no Ano;Falta Pagar;% do Total",
+                            ShortMonths[selectedMonth - 1], selectedYear));
+                        foreach (DataGridViewRow row in gridSummary.Rows)
+                        {
+                            if ((row.Tag as string) == "EMPTY") continue;
+                            List<string> cols = new List<string>();
+                            for (int c = 0; c < row.Cells.Count; c++)
+                            {
+                                object v = row.Cells[c].Value;
+                                string txt = v is decimal
+                                    ? ((decimal)v).ToString("P1", new CultureInfo("pt-BR"))
+                                    : Convert.ToString(v);
+                                cols.Add(EscapeCsv((txt ?? "").Trim()));
+                            }
+                            sb.AppendLine(string.Join(";", cols.ToArray()));
+                        }
+                    }
+                    else if (isAnnual)
                     {
                         sb.AppendLine("Conta;Vencimento;Jan;Fev;Mar;Abr;Mai;Jun;Jul;Ago;Set;Out;Nov;Dez;Total no Ano (R$)");
                         foreach (DataGridViewRow row in gridAnnual.Rows)
@@ -2944,14 +4097,15 @@ namespace ContasAPagar
                     }
                     else
                     {
-                        sb.AppendLine("Paga;Data do Pagamento;Conta;Categoria;Recorrencia;Primeiro Pagamento;Valor (R$);Situacao;Observacoes");
+                        sb.AppendLine("Paga;Data do Pagamento;Conta;Pessoa;Categoria;Recorrencia;Primeiro Pagamento;Valor (R$);Situacao;Observacoes");
                         foreach (DataGridViewRow row in gridMonthly.Rows)
                         {
                             bool paid = Convert.ToBoolean(row.Cells["ColPaid"].Value);
-                            sb.AppendFormat("{0};{1};{2};{3};{4};{5};{6};{7};{8}\r\n",
+                            sb.AppendFormat("{0};{1};{2};{3};{4};{5};{6};{7};{8};{9}\r\n",
                                 paid ? "SIM" : "NAO",
                                 row.Cells["ColDueDate"].Value,
                                 EscapeCsv(Convert.ToString(row.Cells["ColName"].Value)),
+                                EscapeCsv(Convert.ToString(row.Cells["ColPerson"].Value)),
                                 EscapeCsv(Convert.ToString(row.Cells["ColCategory"].Value)),
                                 EscapeCsv(Convert.ToString(row.Cells["ColInstallment"].Value)),
                                 EscapeCsv(Convert.ToString(row.Cells["ColStart"].Value)),
@@ -2965,6 +4119,13 @@ namespace ContasAPagar
                     MessageBox.Show(this, "Planilha exportada com sucesso para:\n" + sfd.FileName, "Exportação Concluída", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
             }
+        }
+
+        private static string SafeFileName(string s)
+        {
+            string name = (s ?? "").Trim().Replace(' ', '_');
+            foreach (char c in Path.GetInvalidFileNameChars()) name = name.Replace(c.ToString(), "");
+            return name.Length == 0 ? "Contas" : name;
         }
 
         private static string EscapeCsv(string s)
@@ -3015,7 +4176,7 @@ namespace ContasAPagar
 
         private void ShiftPeriod(int delta)
         {
-            if (tabControl != null && tabControl.SelectedIndex == 0)
+            if (tabControl != null && (tabControl.SelectedIndex == TabAnnual || tabControl.SelectedIndex == TabSummary))
             {
                 selectedYear += delta;
                 selectedYear = Math.Min(2100, Math.Max(2020, selectedYear));
@@ -3355,9 +4516,40 @@ namespace ContasAPagar
                 if (!AutoUpdater.IsNewerVersion("1.0.0", "1.0.1") || !AutoUpdater.IsNewerVersion("1.0.0", "1.1.0"))
                     throw new Exception("AutoUpdater version comparison failed");
 
+                // Migração de banco antigo (sem pessoas): cria a pessoa principal e atribui as contas
+                var legacyJson = "{\"Bills\":[{\"Id\":\"a1\",\"Name\":\"Luz\",\"Amount\":100,\"DueDay\":5,\"StartMonth\":1,\"StartYear\":2026,\"RecurrenceCount\":0,\"Active\":true}],\"Payments\":[]}";
+                AppDatabase legacy;
+                using (var ms = new MemoryStream(Encoding.UTF8.GetBytes(legacyJson)))
+                {
+                    legacy = (AppDatabase)new DataContractJsonSerializer(typeof(AppDatabase)).ReadObject(ms);
+                }
+                legacy.EnsureIntegrity();
+                if (legacy.People.Count != 1 || !legacy.People[0].IsMain)
+                    throw new Exception("Legacy migration should create the main person");
+                if (legacy.Bills[0].PersonId != Person.MainPersonId || legacy.Bills[0].IsVariableAmount)
+                    throw new Exception("Legacy bills should belong to main person and be fixed-amount");
+
+                // Round-trip das novas propriedades
+                var other = new Person { Name = "Vó" };
+                legacy.People.Add(other);
+                legacy.Bills.Add(new BillDefinition { Name = "Água Vó", PersonId = other.Id, IsVariableAmount = true });
+                AppDatabase roundTrip;
+                using (var ms = new MemoryStream())
+                {
+                    var ser = new DataContractJsonSerializer(typeof(AppDatabase));
+                    ser.WriteObject(ms, legacy);
+                    ms.Position = 0;
+                    roundTrip = (AppDatabase)ser.ReadObject(ms);
+                }
+                roundTrip.EnsureIntegrity();
+                var water = roundTrip.Bills.First(b => b.Name == "Água Vó");
+                if (water.PersonId != other.Id || !water.IsVariableAmount || roundTrip.People.Count != 2)
+                    throw new Exception("Person / variable amount round-trip failed");
+
                 // Instantiate forms to verify UI layout construction
                 using (var mainForm = new MainForm())
-                using (var dlg = new BillDialog(bill, 11, 2026))
+                using (var dlg = new BillDialog(bill, 11, 2026, roundTrip.OrderedPeople(), other.Id))
+                using (var peopleDlg = new PeopleManagerDialog(roundTrip))
                 using (var instForm = new InstallerForm())
                 {
                     mainForm.RefreshAllViews();
